@@ -107,6 +107,43 @@ describe('无令牌请求一律被拒（验收标准 3）', () => {
     expect((await rawMe('Basic ' + bob.token)).status).toBe(401)
   })
 
+  it('OPTIONS 不产生写副作用：既不续期会话也不动 last_seen_at（补遗 10）', async () => {
+    const login = await api(ctx, 'POST', '/api/auth/login', {
+      body: { username: 'bob', password: 'member-password-1' },
+    })
+    const token = login.body.token as string
+    const { createHash } = await import('node:crypto')
+    const tokenHash = createHash('sha256').update(token, 'utf8').digest('hex')
+
+    // 把两个时间戳推到 2000 年：若 OPTIONS 真的写了库，同一秒内也能判定出来
+    const PAST = '2000-01-01T00:00:00+08:00'
+    ctx.db.prepare('UPDATE users SET last_seen_at = ? WHERE username = ?').run(PAST, 'bob')
+    ctx.db.prepare('UPDATE sessions SET last_used_at = ? WHERE token_hash = ?').run(PAST, tokenHash)
+    const snapshot = () => ({
+      seen: (
+        ctx.db.prepare('SELECT last_seen_at FROM users WHERE username = ?').get('bob') as {
+          last_seen_at: string
+        }
+      ).last_seen_at,
+      session: ctx.db
+        .prepare('SELECT last_used_at FROM sessions WHERE token_hash = ?')
+        .get(tokenHash) as { last_used_at: string },
+    })
+    const before = snapshot()
+    expect(before.seen).toBe(PAST)
+    expect(before.session.last_used_at).toBe(PAST)
+
+    // 有效令牌 + 不存在的路径：仍是 404，但一个字都不许写
+    const res = await api(ctx, 'OPTIONS', '/api/nope', { token })
+    expect(res.status).toBe(404)
+    expect(snapshot()).toEqual(before)
+
+    // 同一令牌走真实入口时才应当续期与 touch
+    expect((await api(ctx, 'GET', '/api/auth/me', { token })).status).toBe(200)
+    expect(snapshot().seen).not.toBe(PAST)
+    expect(snapshot().session.last_used_at).not.toBe(PAST)
+  })
+
   it('OPTIONS 不得免鉴权：无令牌 401、有令牌 404，且都不带 Allow（ADR-008 §8 补遗 5）', async () => {
     for (const path of ['/api/auth/logout', '/api/auth/me', '/api/members', '/api/invites']) {
       const noToken = await api(ctx, 'OPTIONS', path)

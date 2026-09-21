@@ -64,6 +64,8 @@ export function createApp(options: AppOptions): Express {
   }
 
   const requireAuth = createRequireAuth(db, config)
+  // OPTIONS 关口专用：只读鉴权，不续期、不 touch（ADR-008 §8 补遗 10）。
+  const requireAuthReadOnly = createRequireAuth(db, config, { readOnly: true })
 
   app.use('/api', (_req, res, next) => {
     // 令牌在响应体里，任何中间缓存都不该留存。
@@ -76,12 +78,14 @@ export function createApp(options: AppOptions): Express {
   // 一旦需要「除了……之外」的注解就不再可机械核对。在路由挂载前先拦下：
   // 无令牌 → 401，有令牌 → 404（本阶段没有任何 OPTIONS 入口），响应里不带 Allow。
   // 放在这里也意味着路由器根本收不到 OPTIONS，默认处理器没有触发机会。
+  // 用只读鉴权（补遗 10）：OPTIONS 一律不写库——否则一个 404 会顺带续期会话、
+  // 把「最近活跃」顶到当前时间；无令牌 401 / 有令牌 404 / 伪造令牌 401 三者不变。
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     if (req.method !== 'OPTIONS') {
       next()
       return
     }
-    requireAuth(req, res, (error?: unknown) => {
+    requireAuthReadOnly(req, res, (error?: unknown) => {
       next(error ?? notFound())
     })
   })

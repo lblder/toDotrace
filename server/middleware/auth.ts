@@ -16,7 +16,22 @@ import type { AuthContext } from '../types.js'
  * - 通过后把账号身份挂到 req.auth，后续所有路由据此做所有权与角色判断；
  * - 30 天滑动续期：每次成功鉴权更新 last_used_at 与 expires_at（ADR-008 §5）。
  */
-export function createRequireAuth(db: Db, config: Config): RequestHandler {
+export interface RequireAuthOptions {
+  /**
+   * 只读校验：**不续期、不 touch `last_seen_at`、也不清理过期会话行**。
+   *
+   * 供 OPTIONS 关口使用（ADR-008 §8 补遗 10）：那里只需要回答「令牌是否有效」，
+   * 走完整鉴权会让一个 404 产生写副作用，且任何人拿有效令牌发一次 OPTIONS
+   * 就能把该账号的「最近活跃」顶到当前时间——它实际上什么都没做。
+   */
+  readOnly?: boolean
+}
+
+export function createRequireAuth(
+  db: Db,
+  config: Config,
+  options: RequireAuthOptions = {},
+): RequestHandler {
   return (req: Request, _res: Response, next: NextFunction) => {
     const token = parseBearerToken(req.header('authorization'))
     if (token === null) {
@@ -31,8 +46,15 @@ export function createRequireAuth(db: Db, config: Config): RequestHandler {
     }
     if (isExpired(found.session.expires_at)) {
       // 过期即清理该会话行，避免失效令牌长期留存。
-      deleteSessionById(db, found.session.id)
+      // 只读模式下不写库：清理交给下一次真实请求做。
+      if (!options.readOnly) deleteSessionById(db, found.session.id)
       next(invalidToken())
+      return
+    }
+
+    if (options.readOnly) {
+      req.auth = { user: found.user, session: found.session }
+      next()
       return
     }
 
