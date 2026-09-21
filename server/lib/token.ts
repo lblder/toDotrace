@@ -19,10 +19,16 @@ export function hashSecret(secret: string): string {
   return createHash('sha256').update(secret, 'utf8').digest('hex')
 }
 
-/** 从 `Authorization: Bearer <token>` 中取出令牌；缺失或格式不符返回 null。 */
+/**
+ * 从 `Authorization: Bearer <token>` 中取出令牌；缺失或格式不符返回 null。
+ *
+ * 方案名大小写不敏感（RFC 7235 §2.1：scheme 的比较是大小写无关的）——
+ * `bearer` / `BEARER` 与 `Bearer` 等价（ADR-008 §8 补遗 6）。
+ * 令牌本身仍然区分大小写。
+ */
 export function parseBearerToken(header: string | undefined): string | null {
   if (!header) return null
-  const match = /^Bearer[ ]+(\S+)$/.exec(header.trim())
+  const match = /^Bearer[ ]+(\S+)$/i.exec(header.trim())
   if (!match) return null
   const token = match[1]!
   if (token.length === 0 || token.length > 512) return null

@@ -26,11 +26,15 @@ export class LoginThrottle {
   }
 
   /**
-   * 计数键：用户名去空白 + 转小写。
-   * 收紧方向是安全的——大小写变体共用同一个计数器，无法靠换大小写绕过锁定。
+   * 计数键：用户名 trim 后**原样**（保持大小写，ADR-008 §8 补遗 3）。
+   *
+   * 不能转小写：登录查询是大小写敏感的，`Alice` 与 `alice` 是两个可共存的账号，
+   * 合并成一个桶会让「对 Alice 故意失败 5 次」连带锁死 alice。
+   * 而转小写本要防的「换大小写绕过锁定」在大小写敏感的账号模型下不成立——
+   * 换个大小写就是在打另一个账号。
    */
   private key(username: string): string {
-    return username.trim().toLowerCase()
+    return username.trim()
   }
 
   /** 锁定中返回剩余毫秒数；未锁定返回 null（并顺带清掉已过期的锁）。 */

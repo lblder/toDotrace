@@ -45,9 +45,25 @@ function issueSession(db: Db, config: Config, user: UserRow): { token: string; e
   return { token, expiresAt }
 }
 
+/** 唯一约束冲突的兜底识别：并发或「有 member 无 owner」的库形态下，把 500 变成 409。 */
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string' &&
+    (error as { code: string }).code.startsWith('SQLITE_CONSTRAINT')
+  )
+}
+
 /**
  * 首启引导建 owner（ADR-008 §2）：**仅当库中无 owner 时可用**。
  * 检查在事务内双重执行——并发的两个引导请求只会成功一个。
+ *
+ * ownerExists 只闸「有没有 owner」，不闸「这个用户名是否已被 member 占着」：
+ * 库形态为「有 member、无 owner」时（例如 owner 被删、或从别处拷来的库），
+ * 用已存在的用户名引导会撞 users.username 的 UNIQUE。此时必须兜底成 409，
+ * 口径与 registerWithInvite 一致，而不是把约束错误漏成 500。
  */
 export async function createOwner(
   db: Db,
@@ -76,7 +92,16 @@ export async function createOwner(
     return created
   })
 
-  const user = create()
+  let user: UserRow
+  try {
+    user = create()
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw conflict('conflict/username-taken', '用户名已被占用')
+    }
+    throw error
+  }
+
   const { token } = issueSession(db, config, user)
   return { user: toPublicUser(user), token }
 }
@@ -130,7 +155,9 @@ export async function registerWithInvite(
   const invite = findInviteByCodeHash(db, codeHash)
   if (!invite) throw inviteInvalid()
   if (invite.used_by !== null) throw conflict('conflict/invite-used', '邀请码已被使用')
-  if (isExpired(invite.expires_at)) throw inviteInvalid('邀请码已过期')
+  // 「不存在」与「已过期」必须同一文案（ADR-008 §8 补遗 8）：错误码本就同为一个
+  // invite/invalid，文案差异却泄露「该码曾经存在」——成为探测邀请码的手段。
+  if (isExpired(invite.expires_at)) throw inviteInvalid()
 
   const passwordHash = await hashPassword(input.password)
   const id = uuidv7()
@@ -141,7 +168,7 @@ export async function registerWithInvite(
     const fresh = findInviteByCodeHash(db, codeHash)
     if (!fresh) throw inviteInvalid()
     if (fresh.used_by !== null) throw conflict('conflict/invite-used', '邀请码已被使用')
-    if (isExpired(fresh.expires_at)) throw inviteInvalid('邀请码已过期')
+    if (isExpired(fresh.expires_at)) throw inviteInvalid()
 
     if (findUserByUsername(db, input.username)) {
       throw conflict('conflict/username-taken', '用户名已被占用')
@@ -176,16 +203,6 @@ export async function registerWithInvite(
 
   const { token } = issueSession(db, config, user)
   return { user: toPublicUser(user), token }
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    typeof (error as { code?: unknown }).code === 'string' &&
-    (error as { code: string }).code.startsWith('SQLITE_CONSTRAINT')
-  )
 }
 
 /** 登出：立即删除该会话行（ADR-008 §5）。 */

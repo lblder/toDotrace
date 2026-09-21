@@ -9,7 +9,7 @@
 
 cd "$(dirname "$0")" || exit 1
 
-PORT="${TODOAGENT_API_PORT:-8787}"
+PORT="${TODOAGENT_API_PORT:-8788}"
 HOST="127.0.0.1"
 SERVER_PID=""
 
@@ -127,7 +127,7 @@ if [ "${TODOAGENT_NO_BROWSER:-}" != "1" ]; then
 fi
 
 echo
-echo "数据文件：$(pwd)/data/app.db —— 停服务后复制该文件即完整备份。"
+echo "数据文件：${TODOAGENT_DB_PATH:-$(pwd)/data/app.db} —— 停服务后复制该文件即完整备份。"
 echo
 
 wait "$SERVER_PID"

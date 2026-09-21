@@ -37,7 +37,10 @@ export interface TestContext {
 }
 
 /** 每个测试文件一个独立临时库 + 一个真实监听（端口 0）的服务实例。 */
-export async function startTestServer(overrides: Partial<Config> = {}): Promise<TestContext> {
+export async function startTestServer(
+  overrides: Partial<Config> = {},
+  appOptions: { logRequests?: boolean } = {},
+): Promise<TestContext> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'todoagent-test-'))
   const dbPath = path.join(dir, 'app.db')
   const db = openMigratedDatabase(dbPath)
@@ -47,7 +50,13 @@ export async function startTestServer(overrides: Partial<Config> = {}): Promise<
     maxFailures: config.loginMaxFailures,
     lockMs: config.loginLockMs,
   })
-  const app = createApp({ db, config, throttle, logError: () => {}, logRequests: false })
+  const app = createApp({
+    db,
+    config,
+    throttle,
+    logError: () => {},
+    logRequests: appOptions.logRequests ?? false,
+  })
   const server = await new Promise<Server>((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s))
   })

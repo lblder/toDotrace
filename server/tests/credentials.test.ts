@@ -62,14 +62,21 @@ describe('令牌与邀请码（ADR-008 §4）', () => {
     expect(hashSecret(generateSecret())).not.toBe(hash)
   })
 
-  it('Bearer 头解析', () => {
+  it('Bearer 头解析：方案名大小写不敏感，令牌本身区分大小写', () => {
     expect(parseBearerToken('Bearer abc')).toBe('abc')
     expect(parseBearerToken('Bearer   abc  ')).toBe('abc')
+    // RFC 7235：scheme 比较大小写无关（ADR-008 §8 补遗 6）
+    expect(parseBearerToken('bearer abc')).toBe('abc')
+    expect(parseBearerToken('BEARER abc')).toBe('abc')
+    expect(parseBearerToken('BeArEr abc')).toBe('abc')
+    // 令牌本身仍然区分大小写：原样返回，不做归一
+    expect(parseBearerToken('Bearer AbC')).toBe('AbC')
     expect(parseBearerToken(undefined)).toBeNull()
     expect(parseBearerToken('')).toBeNull()
     expect(parseBearerToken('abc')).toBeNull()
     expect(parseBearerToken('Basic abc')).toBeNull()
     expect(parseBearerToken('Bearer ')).toBeNull()
+    expect(parseBearerToken('Bearerbearer abc')).toBeNull()
   })
 })
 
@@ -92,11 +99,16 @@ describe('登录防爆破（ADR-008 §5）', () => {
     expect(throttle.peek('bob')).toBeUndefined()
   })
 
-  it('大小写与空白变体共用同一计数器（不能靠换大小写绕过）', () => {
+  it('分桶键 = trim 后的原样用户名：首尾空白同桶、大小写各计各的', () => {
     const throttle = new LoginThrottle({ maxFailures: 2, lockMs: 1000 })
-    throttle.recordFailure('Alice', 0)
-    expect(throttle.recordFailure(' alice ', 0)).toBe(true)
-    expect(throttle.lockedForMs('ALICE', 0)).toBe(1000)
+    // 首尾空白被 trim 掉 → 与 'Alice' 同一个桶（登录入口本来也 trim）
+    throttle.recordFailure(' Alice ', 0)
+    expect(throttle.recordFailure('Alice', 0)).toBe(true)
+    expect(throttle.lockedForMs('Alice', 0)).toBe(1000)
+    // 只差大小写是两个账号（登录查询大小写敏感）→ 各自独立计数，绝不互相牵连
+    expect(throttle.lockedForMs('alice', 0)).toBeNull()
+    expect(throttle.recordFailure('ALICE', 0)).toBe(false)
+    expect(throttle.lockedForMs('ALICE', 0)).toBeNull()
   })
 })
 

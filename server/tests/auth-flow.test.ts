@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CONTENT_SECURITY_POLICY } from '../middleware/security.js'
 import {
   api,
@@ -88,9 +88,37 @@ describe('无令牌请求一律被拒（验收标准 3）', () => {
     expect(res.body.error.code).toBe('auth/invalid-token')
   })
 
-  it('令牌大小写/前缀不合法也算无效', async () => {
-    const res = await api(ctx, 'GET', '/api/auth/me', { token: 'bearer ' + bob.token })
-    expect(res.status).toBe(401)
+  it('方案名大小写不敏感（RFC 7235），令牌本身无效才算无效', async () => {
+    // ADR-008 §8 补遗 6：`bearer` / `BEARER` 与 `Bearer` 等价。
+    // 这里必须直接发原始头——helpers.api 的 token 参数会自动加 `Bearer ` 前缀。
+    const rawMe = async (authorization: string) => {
+      const res = await fetch(`${ctx.baseUrl}/api/auth/me`, { headers: { Authorization: authorization } })
+      return { status: res.status, body: await res.json() }
+    }
+    for (const scheme of ['bearer', 'BEARER', 'BeArEr']) {
+      const ok = await rawMe(`${scheme} ${bob.token}`)
+      expect(ok.status, scheme).toBe(200)
+      expect(ok.body.user.id).toBe(bob.id)
+    }
+    // 方案名之外的形态仍应被拒
+    const forged = await rawMe('bearer ' + 'A'.repeat(43))
+    expect(forged.status).toBe(401)
+    expect(forged.body.error.code).toBe('auth/invalid-token')
+    expect((await rawMe('Basic ' + bob.token)).status).toBe(401)
+  })
+
+  it('OPTIONS 不得免鉴权：无令牌 401、有令牌 404，且都不带 Allow（ADR-008 §8 补遗 5）', async () => {
+    for (const path of ['/api/auth/logout', '/api/auth/me', '/api/members', '/api/invites']) {
+      const noToken = await api(ctx, 'OPTIONS', path)
+      expect(noToken.status, path).toBe(401)
+      expect(noToken.body.error.code).toBe('auth/missing-token')
+      expect(noToken.headers.get('allow'), path).toBeNull()
+
+      const withToken = await api(ctx, 'OPTIONS', path, { token: alice.token })
+      expect(withToken.status, path).toBe(404)
+      expect(withToken.body.error.code).toBe('not-found')
+      expect(withToken.headers.get('allow'), path).toBeNull()
+    }
   })
 })
 
@@ -392,6 +420,156 @@ describe('错误信封与状态码约定（ADR-008 §1）', () => {
     expect(res.headers.get('x-content-type-options')).toBe('nosniff')
     expect(res.headers.get('referrer-policy')).toBe('no-referrer')
     expect(res.headers.get('x-powered-by')).toBeNull()
+  })
+})
+
+describe('独立验证后的补遗条款（ADR-008 §8 补遗 1–9）', () => {
+  it('防爆破按用户名原样分桶：锁死 ALICE 不影响 alice（补遗 3）', async () => {
+    const fresh = await startTestServer()
+    try {
+      const owner = await createOwnerAccount(fresh, 'casey', 'casey-password-1', '凯西')
+      await createMemberAccount(fresh, owner.token, 'ALICE', 'alice-upper-pw-1', '大写')
+      await createMemberAccount(fresh, owner.token, 'alice', 'alice-lower-pw-1', '小写')
+
+      for (let i = 1; i <= 5; i += 1) {
+        const res = await api(fresh, 'POST', '/api/auth/login', {
+          body: { username: 'ALICE', password: 'wrong-password' },
+        })
+        expect(res.status, `第 ${i} 次`).toBe(401)
+      }
+      const locked = await api(fresh, 'POST', '/api/auth/login', {
+        body: { username: 'ALICE', password: 'alice-upper-pw-1' },
+      })
+      expect(locked.status).toBe(429)
+
+      const other = await api(fresh, 'POST', '/api/auth/login', {
+        body: { username: 'alice', password: 'alice-lower-pw-1' },
+      })
+      expect(other.status).toBe(200)
+      expect(other.body.user.username).toBe('alice')
+    } finally {
+      await fresh.close()
+    }
+  })
+
+  it('拒绝纯空白口令，但不 trim 的语义不变（补遗 7）', async () => {
+    const fresh = await startTestServer()
+    try {
+      const blank = await api(fresh, 'POST', '/api/setup/owner', {
+        body: { username: 'owner1', password: ' '.repeat(8), displayName: '主' },
+      })
+      expect(blank.status).toBe(400)
+      expect(blank.body.error.code).toBe('validation/invalid-input')
+
+      const owner = await createOwnerAccount(fresh, 'owner2', 'owner2-password-1', '主')
+      const invite = await api(fresh, 'POST', '/api/invites', { token: owner.token, body: {} })
+      const code = invite.body.invite.code
+
+      const blankRegister = await api(fresh, 'POST', '/api/auth/register', {
+        body: { username: 'blanky', password: '\t  \n\t  \n', displayName: '空白', inviteCode: code },
+      })
+      expect(blankRegister.status).toBe(400)
+      expect(blankRegister.body.error.code).toBe('validation/invalid-input')
+
+      // 被拒的注册不消耗邀请码
+      const retry = await api(fresh, 'POST', '/api/auth/register', {
+        body: { username: 'blanky', password: 'pass word 1234', displayName: '正常', inviteCode: code },
+      })
+      expect(retry.status).toBe(200)
+
+      // 口令里的空格是有效字符（不 trim）：必须按原样比对
+      expect(
+        (
+          await api(fresh, 'POST', '/api/auth/login', {
+            body: { username: 'blanky', password: 'pass word 1234' },
+          })
+        ).status,
+      ).toBe(200)
+      expect(
+        (
+          await api(fresh, 'POST', '/api/auth/login', {
+            body: { username: 'blanky', password: 'password1234' },
+          })
+        ).status,
+      ).toBe(401)
+    } finally {
+      await fresh.close()
+    }
+  })
+
+  it('邀请码「不存在」与「已过期」文案与错误码完全一致（补遗 8）', async () => {
+    const absent = await api(ctx, 'POST', '/api/auth/register', {
+      body: {
+        username: 'probe9',
+        password: 'password-1234',
+        displayName: '探针',
+        inviteCode: 'NOPE-NOPE-NOPE-NOPE-NOPE-NOPE-NOPE-NOPE-NOP',
+      },
+    })
+    expect(absent.status).toBe(400)
+
+    const invite = await api(ctx, 'POST', '/api/invites', { token: alice.token, body: {} })
+    ctx.db
+      .prepare('UPDATE invites SET expires_at = ? WHERE id = ?')
+      .run('2000-01-01T00:00:00+08:00', invite.body.invite.id)
+    const expired = await api(ctx, 'POST', '/api/auth/register', {
+      body: {
+        username: 'probe9',
+        password: 'password-1234',
+        displayName: '探针',
+        inviteCode: invite.body.invite.code,
+      },
+    })
+
+    expect(expired.status).toBe(400)
+    expect(expired.body.error.code).toBe('invite/invalid')
+    expect(expired.body).toEqual(absent.body) // 文案不得有差异，否则泄露「该码曾经存在」
+  })
+
+  it('库中「有 member、无 owner」时用已存在的用户名引导 → 409 而不是 500（补遗：与注册对齐）', async () => {
+    const fresh = await startTestServer()
+    try {
+      const owner = await createOwnerAccount(fresh, 'harry', 'harry-password-1', '哈利')
+      await createMemberAccount(fresh, owner.token, 'iris', 'iris-password-1', '艾里斯')
+      // 造出「有 member、无 owner」的库形态
+      fresh.db.prepare("DELETE FROM users WHERE role = 'owner'").run()
+      expect((await api(fresh, 'GET', '/api/setup/status')).body).toEqual({ needsOwner: true })
+
+      const res = await api(fresh, 'POST', '/api/setup/owner', {
+        body: { username: 'iris', password: 'another-password-1', displayName: '重复' },
+      })
+      expect(res.status).toBe(409)
+      expect(res.body.error.code).toBe('conflict/username-taken')
+    } finally {
+      await fresh.close()
+    }
+  })
+
+  it('请求日志记录完整路径（补遗 9），且不含令牌与口令', async () => {
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '))
+    })
+    const fresh = await startTestServer({}, { logRequests: true })
+    try {
+      const owner = await createOwnerAccount(fresh, 'loggy', 'loggy-password-1', '日志')
+      await api(fresh, 'GET', '/api/members', { token: owner.token })
+      await api(fresh, 'GET', '/api/invites', { token: owner.token })
+      await api(fresh, 'POST', '/api/auth/logout', { token: owner.token })
+      await api(fresh, 'GET', '/api/auth/me', { token: owner.token })
+    } finally {
+      await fresh.close()
+      spy.mockRestore()
+    }
+    const text = logged.join('\n')
+    // 关键：成功请求也必须带完整挂载前缀（原实现在 finish 里读 req.path，全被剥成 "/"）
+    expect(text).toContain('GET /api/members 200')
+    expect(text).toContain('GET /api/invites 200')
+    expect(text).toContain('POST /api/auth/logout 204')
+    expect(text).not.toMatch(/^GET \/ 200$/m)
+    expect(text).not.toMatch(/^GET \/me 200$/m)
+    expect(text).not.toContain('loggy-password-1')
+    expect(text).not.toMatch(/Bearer /)
   })
 })
 

@@ -5,6 +5,7 @@ import type { Config } from './config.js'
 import type { Db } from './db/index.js'
 import { LoginThrottle } from './domain/login-throttle.js'
 import { createRequireAuth, requireOwner } from './middleware/auth.js'
+import { notFound } from './lib/errors.js'
 import { createErrorHandler, notFoundHandler } from './middleware/error.js'
 import { securityHeaders } from './middleware/security.js'
 import { authRoutes } from './routes/auth.js'
@@ -51,8 +52,12 @@ export function createApp(options: AppOptions): Express {
       const startedAt = process.hrtime.bigint()
       res.on('finish', () => {
         const ms = Number(process.hrtime.bigint() - startedAt) / 1e6
-        // req.path 不含查询串；本阶段路由无查询参数，令牌只走请求头。
-        console.log(`${req.method} ${req.path} ${res.statusCode} ${ms.toFixed(1)}ms`)
+        // 必须用 originalUrl 而不是 path：finish 回调里 Express 仍处在挂载的路由器内部，
+        // req.path 已被剥掉挂载前缀，`GET /api/members` 会记成 `GET /`——这条日志是
+        // 「无令牌请求一律被拒」的取证依据（ADR-008 §8 补遗 9），路径失真即证据失效。
+        // 只取路径部分：查询串本阶段无用，且可能被用来夹带敏感值，一律不记。
+        const pathOnly = req.originalUrl.split('?')[0] || '/'
+        console.log(`${req.method} ${pathOnly} ${res.statusCode} ${ms.toFixed(1)}ms`)
       })
       next()
     })
@@ -65,6 +70,22 @@ export function createApp(options: AppOptions): Express {
     res.setHeader('Cache-Control', 'no-store')
     next()
   })
+
+  // OPTIONS 一律不得免鉴权（ADR-008 §8 补遗 5）：Express 的路由级默认 OPTIONS 处理器
+  // 会在未鉴权时返回 `200 Allow: ...`，字面违反「无令牌请求一律被拒」——而验收标准
+  // 一旦需要「除了……之外」的注解就不再可机械核对。在路由挂载前先拦下：
+  // 无令牌 → 401，有令牌 → 404（本阶段没有任何 OPTIONS 入口），响应里不带 Allow。
+  // 放在这里也意味着路由器根本收不到 OPTIONS，默认处理器没有触发机会。
+  app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+    if (req.method !== 'OPTIONS') {
+      next()
+      return
+    }
+    requireAuth(req, res, (error?: unknown) => {
+      next(error ?? notFound())
+    })
+  })
+
   app.use('/api', express.json({ limit: '64kb' }))
 
   app.use('/api/setup', setupRoutes(db, config))
