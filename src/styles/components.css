@@ -1,0 +1,313 @@
+/* ==========================================================================
+   TodoAgent · 基础控件
+   --------------------------------------------------------------------------
+   阶段 1 只落地账号页需要的少数原语；后续阶段在此扩展，不另起一套。
+   所有颜色、圆角、阴影、时长均取自 tokens.css —— 本文件不出现字面色值。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   按钮
+   -------------------------------------------------------------------------- */
+
+.ta-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--space-5);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.ta-btn:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.ta-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ta-btn--block {
+  width: 100%;
+}
+
+.ta-btn--sm {
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  font-size: var(--fs-md);
+  border-radius: var(--radius-sm);
+}
+
+/* 主按钮：黄铜实心 */
+.ta-btn--primary {
+  background: var(--c-primary);
+  color: var(--c-on-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.ta-btn--primary:hover:not(:disabled) {
+  background: var(--c-primary);
+  box-shadow: var(--shadow-sm);
+  filter: brightness(1.06);
+}
+
+/* 次按钮：面板 + 描边 */
+.ta-btn--secondary {
+  background: var(--c-panel-raised);
+  border-color: var(--c-border-strong);
+  color: var(--c-ink);
+}
+
+.ta-btn--secondary:hover:not(:disabled) {
+  background: var(--c-panel);
+  border-color: var(--c-ink-faint);
+}
+
+/* 幽灵按钮：仅文字 */
+.ta-btn--ghost {
+  background: transparent;
+  color: var(--c-ink-muted);
+  padding: 0 var(--space-3);
+}
+
+.ta-btn--ghost:hover:not(:disabled) {
+  background: var(--c-primary-soft);
+  color: var(--c-ink);
+}
+
+/* 危险按钮：印泥红 */
+.ta-btn--danger {
+  background: transparent;
+  border-color: var(--c-overdue);
+  color: var(--c-overdue-text);
+}
+
+.ta-btn--danger:hover:not(:disabled) {
+  background: var(--c-overdue-soft);
+}
+
+/* --------------------------------------------------------------------------
+   表单字段
+   -------------------------------------------------------------------------- */
+
+.ta-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ta-field__label {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  color: var(--c-ink-muted);
+}
+
+.ta-field__control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ta-input {
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--c-bg-sunken);
+  color: var(--c-ink);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.ta-input::placeholder {
+  color: var(--c-ink-faint);
+}
+
+.ta-input:hover:not(:disabled) {
+  border-color: var(--c-ink-faint);
+}
+
+/*
+ * 键盘焦点：边框转黄铜，焦点环交给 base.css 的全局 :focus-visible（实心 --c-focus）。
+ * 这里**不得**写 `outline: none`——曾用「14% 透明度的柔光」顶替焦点环，实测
+ * 计算样式是 outline-style:none，环根本看不见（WCAG 2.2 SC 2.4.11 / 1.4.11）。
+ * 柔光可以叠加，但不能是唯一的焦点指示。
+ */
+.ta-input:focus-visible {
+  border-color: var(--c-primary);
+}
+
+.ta-input:disabled {
+  cursor: not-allowed;
+  color: var(--c-ink-faint);
+  background: var(--c-panel);
+}
+
+.ta-input[aria-invalid='true'] {
+  border-color: var(--c-overdue);
+}
+
+/* 出错的字段被聚焦时，环也用印泥红：一眼看出焦点在哪、且那一格是错的 */
+.ta-input[aria-invalid='true']:focus-visible {
+  outline-color: var(--c-overdue-text);
+}
+
+.ta-input--with-affix {
+  padding-right: calc(var(--control-h) - var(--space-2));
+}
+
+/* 密码可见性开关：图标按钮，命中区 44×44 */
+.ta-field__affix {
+  position: absolute;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-ink-faint);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.ta-field__affix:hover {
+  color: var(--c-ink);
+}
+
+.ta-field__hint {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-faint);
+  line-height: var(--lh-snug);
+}
+
+.ta-field__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  font-size: var(--fs-sm);
+  color: var(--c-overdue-text);
+  line-height: var(--lh-snug);
+}
+
+/* --------------------------------------------------------------------------
+   横幅（表单级错误 / 提示）
+   -------------------------------------------------------------------------- */
+
+.ta-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border-strong);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-md);
+  line-height: var(--lh-snug);
+  background: var(--c-panel-raised);
+  color: var(--c-ink);
+}
+
+.ta-banner--error {
+  border-color: var(--c-overdue);
+  background: var(--c-overdue-soft);
+}
+
+.ta-banner--success {
+  border-color: var(--c-success);
+  background: var(--c-success-soft);
+}
+
+.ta-banner--info {
+  border-color: var(--c-primary);
+  background: var(--c-primary-soft);
+}
+
+.ta-banner__icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--c-overdue-text);
+}
+
+.ta-banner--success .ta-banner__icon {
+  color: var(--c-success-text);
+}
+
+.ta-banner--info .ta-banner__icon {
+  color: var(--c-primary-text);
+}
+
+/* --------------------------------------------------------------------------
+   卡片与徽标
+   -------------------------------------------------------------------------- */
+
+.ta-card {
+  padding: var(--space-5);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  background: var(--c-panel);
+  box-shadow: var(--shadow-md);
+}
+
+.ta-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-ink-muted);
+  white-space: nowrap;
+}
+
+.ta-badge--primary {
+  border-color: var(--c-primary);
+  color: var(--c-primary-text);
+  background: var(--c-primary-soft);
+}
+
+.ta-badge--success {
+  border-color: var(--c-success);
+  color: var(--c-success-text);
+  background: var(--c-success-soft);
+}
+
+.ta-badge--overdue {
+  border-color: var(--c-overdue);
+  color: var(--c-overdue-text);
+  background: var(--c-overdue-soft);
+}
+
+/* --------------------------------------------------------------------------
+   图标按钮：正方形命中区（≥44×44），本身只放图标
+   -------------------------------------------------------------------------- */
+
+.ta-icon-btn {
+  width: var(--control-h);
+  min-height: var(--control-h);
+  padding: 0;
+  flex: none;
+}
+

@@ -1,0 +1,112 @@
+/* 工作台首页：欢迎卡 + 进度清单。全部取令牌。 */
+
+.ta-home__hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-home__eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-primary-text);
+}
+
+.ta-home__heading {
+  font-size: var(--fs-2xl);
+  color: var(--c-ink);
+}
+
+.ta-home__subtitle {
+  max-width: var(--layout-measure);
+  color: var(--c-ink-muted);
+}
+
+.ta-home__subtitle code {
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-xs);
+  background: var(--c-bg-sunken);
+  font-size: var(--fs-sm);
+}
+
+.ta-home__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: var(--space-2) 0 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--c-border);
+}
+
+.ta-home__fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ta-home__fact dt {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-ink-faint);
+}
+
+.ta-home__fact dd {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+/* --- 进度清单 ---------------------------------------------------------- */
+
+.ta-home__status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-home__statusHeading {
+  font-size: var(--fs-lg);
+  color: var(--c-ink);
+}
+
+.ta-home__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 用符号 + 颜色双重表达状态，不单靠颜色（无障碍基线） */
+.ta-home__listItem {
+  position: relative;
+  padding-left: var(--space-5);
+  color: var(--c-ink-muted);
+}
+
+.ta-home__listItem::before {
+  position: absolute;
+  left: 0;
+  top: 0;
+  content: '○';
+  color: var(--c-ink-faint);
+}
+
+.ta-home__listItem--done {
+  color: var(--c-ink);
+}
+
+.ta-home__listItem--done::before {
+  content: '●';
+  color: var(--c-success-text);
+}
+
+@media (max-width: 40rem) {
+  .ta-home__heading {
+    font-size: var(--fs-xl);
+  }
+}

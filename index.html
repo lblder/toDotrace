@@ -8,6 +8,12 @@
       CSP 由服务端以响应头下发（ADR-008 §6），不在此处用 meta 声明：
       dev server 的 HMR 需要内联脚本与 websocket，meta CSP 会把它一起挡掉。
     -->
+    <!--
+      首帧主题：必须在样式表生效前同步执行，否则亮色偏好者会先看到一帧暗色。
+      用外链而非内联——CSP 的 script-src 'self' 会拦下内联脚本。
+      逻辑与存储键见 public/theme-init.js 顶部注释。
+    -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,0 +1,189 @@
+/* 邀请码页（owner 专属）的版式。
+   颜色、间距、圆角、时长全部走令牌；此处不出现字面色值。 */
+
+/* --- 页头 -------------------------------------------------------------- */
+
+.ta-invites__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-invites__eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-primary-text);
+}
+
+.ta-invites__heading {
+  font-size: var(--fs-2xl);
+  color: var(--c-ink);
+}
+
+.ta-invites__subtitle {
+  max-width: var(--layout-measure);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-base);
+}
+
+/* --- 分节 -------------------------------------------------------------- */
+
+.ta-invites__issue,
+.ta-invites__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.ta-invites__sectionHeading {
+  font-size: var(--fs-lg);
+  color: var(--c-ink);
+}
+
+.ta-invites__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+
+/* 天数输入不该占满整行——它只放得下两位数字 */
+.ta-invites__form .ta-field {
+  width: 12rem;
+  max-width: 100%;
+}
+
+/* --- 签发结果：一次性明文 ---------------------------------------------- */
+
+.ta-invites__issued {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--c-primary);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--c-primary-soft);
+}
+
+.ta-invites__issuedTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--fw-medium);
+  color: var(--c-ink);
+}
+
+.ta-invites__code {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--c-bg-sunken);
+  color: var(--c-ink);
+  font-size: var(--fs-lg);
+  letter-spacing: var(--ls-wide);
+  /* 码很长，窄屏要能折行而不是溢出 */
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.ta-invites__warn {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  color: var(--c-overdue-text);
+  line-height: var(--lh-snug);
+}
+
+.ta-invites__expiry {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+.ta-invites__issuedActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* --- 记录列表 ---------------------------------------------------------- */
+
+.ta-invites__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ta-invites__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  background: var(--c-panel-raised);
+}
+
+.ta-invites__itemHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ta-invites__itemTime {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+.ta-invites__itemFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: 0;
+}
+
+.ta-invites__itemFacts dt {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-ink-faint);
+}
+
+.ta-invites__itemFacts dd {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+/* --- 辅助文字 ---------------------------------------------------------- */
+
+.ta-invites__hint {
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+}
+
+.ta-invites__footnote {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--c-border);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-faint);
+  line-height: var(--lh-snug);
+}
+
+/* --- 窄屏 -------------------------------------------------------------- */
+
+@media (max-width: 40rem) {
+  .ta-invites__heading {
+    font-size: var(--fs-xl);
+  }
+
+  .ta-invites__form .ta-field {
+    width: 100%;
+  }
+}

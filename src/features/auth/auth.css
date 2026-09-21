@@ -1,0 +1,177 @@
+/* 账号三页（首启引导 / 登录 / 注册）的版式。
+   颜色、间距、圆角、时长全部走令牌；此处不出现字面色值。 */
+
+.ta-auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: var(--space-6) var(--space-4);
+}
+
+.ta-auth__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: 100%;
+  max-width: 27rem;
+}
+
+/* --- 品牌区 ------------------------------------------------------------ */
+
+.ta-auth__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ta-auth__seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--c-panel);
+  color: var(--c-primary);
+  box-shadow: var(--shadow-xs), var(--shadow-inset);
+}
+
+.ta-auth__brandText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ta-auth__wordmark {
+  font-family: var(--font-readout);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-tight);
+  color: var(--c-ink);
+}
+
+.ta-auth__tagline {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+/* --- 卡片 -------------------------------------------------------------- */
+
+.ta-auth__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  /* 全应用仅此一处入场动效，克制且只作用于单元素 */
+  animation: ta-auth-enter var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes ta-auth-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ta-auth__eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-primary-text);
+}
+
+.ta-auth__title {
+  font-size: var(--fs-2xl);
+  color: var(--c-ink);
+}
+
+.ta-auth__subtitle {
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-base);
+}
+
+.ta-auth__rule {
+  display: block;
+  width: 40px;
+  height: 2px;
+  margin: var(--space-1) 0 var(--space-2);
+  background: var(--c-primary);
+  border-radius: var(--radius-full);
+}
+
+/* --- 表单 -------------------------------------------------------------- */
+
+.ta-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-1);
+}
+
+.ta-form .ta-btn--block {
+  margin-top: var(--space-2);
+}
+
+/* --- 页脚 -------------------------------------------------------------- */
+
+.ta-auth__foot {
+  text-align: center;
+}
+
+.ta-auth__footText {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+.ta-linkBtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  margin: calc(-1 * var(--space-2)) 0;
+  padding: var(--space-2) var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--c-primary-text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.ta-linkBtn:hover:not(:disabled) {
+  color: var(--c-primary);
+}
+
+.ta-linkBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* --- 窄屏 -------------------------------------------------------------- */
+
+@media (max-width: 30rem) {
+  .ta-auth {
+    padding: var(--space-5) var(--space-3);
+    align-items: flex-start;
+  }
+
+  .ta-auth__card {
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .ta-auth__title {
+    font-size: var(--fs-xl);
+  }
+}

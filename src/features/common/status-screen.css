@@ -1,0 +1,76 @@
+/* 启动中 / 服务不可达 —— 全屏状态屏 */
+
+.ta-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  min-height: 100dvh;
+  padding: var(--space-5);
+  color: var(--c-primary);
+}
+
+.ta-status__label {
+  font-family: var(--font-readout);
+  font-size: var(--fs-lg);
+  color: var(--c-ink-muted);
+  letter-spacing: var(--ls-wide);
+}
+
+/* 仅启动屏：印章缓慢呼吸（克制的一处动效） */
+.ta-status--boot > svg {
+  animation: ta-status-breathe var(--dur-slow) var(--ease-in-out) infinite alternate;
+}
+
+@keyframes ta-status-breathe {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 尊重 prefers-reduced-motion：直接停掉动画，不依赖「时长归零」的间接效果 */
+@media (prefers-reduced-motion: reduce) {
+  .ta-status--boot > svg {
+    animation: none;
+  }
+}
+
+.ta-status__card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 30rem;
+  color: var(--c-ink);
+}
+
+.ta-status__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--c-overdue-text);
+}
+
+.ta-status__message {
+  color: var(--c-ink);
+}
+
+.ta-status__hint {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-base);
+}
+
+.ta-status__hint code {
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-xs);
+  background: var(--c-bg-sunken);
+  font-size: var(--fs-xs);
+}

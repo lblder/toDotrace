@@ -1,0 +1,138 @@
+/* 登录后的外壳：顶栏 + 主内容容器。全部取令牌。 */
+
+.ta-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+/* --- 顶栏 -------------------------------------------------------------- */
+
+.ta-shell__bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-panel);
+}
+
+.ta-shell__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--c-primary);
+}
+
+.ta-shell__seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--c-bg-sunken);
+}
+
+.ta-shell__title {
+  font-family: var(--font-readout);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink);
+  letter-spacing: var(--ls-tight);
+}
+
+/* --- 导航 -------------------------------------------------------------- */
+
+.ta-shell__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: auto;
+}
+
+/* 用真链接而不是按钮：hash 路由下 href 就是地址，可中键、可复制、可被读屏当链接 */
+.ta-shell__navLink {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.ta-shell__navLink:hover {
+  color: var(--c-ink);
+  background: var(--c-bg-sunken);
+}
+
+/* 当前页：颜色 + 底色 + 字重三重表达，不单靠颜色 */
+.ta-shell__navLink--on {
+  color: var(--c-primary-text);
+  background: var(--c-primary-soft);
+  font-weight: var(--fw-medium);
+}
+
+.ta-shell__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.ta-shell__user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ta-shell__displayName {
+  font-weight: var(--fw-medium);
+}
+
+.ta-shell__account {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+/* --- 主内容 ------------------------------------------------------------ */
+
+.ta-shell__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: 100%;
+  max-width: var(--layout-max);
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+}
+
+/* 跳转链接的落点是 <main tabindex="-1">：它不在 Tab 序列里，
+   画环会把整页框住，因此这里不画——这是可访问性实践里公认的例外。 */
+.ta-shell__main:focus-visible {
+  outline: none;
+}
+
+/* --- 窄屏 -------------------------------------------------------------- */
+
+@media (max-width: 40rem) {
+  .ta-shell__bar {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .ta-shell__main {
+    padding: var(--space-5) var(--space-4) var(--space-7);
+  }
+
+  .ta-shell__account {
+    display: none;
+  }
+}

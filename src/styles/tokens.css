@@ -1,0 +1,256 @@
+/* ==========================================================================
+   TodoAgent · 设计令牌词汇表
+   --------------------------------------------------------------------------
+   开发文档 §7 要求「令牌词汇表一次定稿……命名定稿后不再改名」。
+   本文件即该词汇表的唯一来源，**已定稿（阶段 1）**：
+
+     · 新增令牌是允许的（后续阶段会用到新维度）；
+     · 改名 / 删除令牌是不允许的——既有项目的教训是「改名迁移做一半，
+       新旧两套并存」。要改语义就新增一个名字，旧名保留到全部引用清空为止。
+
+   规则（架构文档 §6）：
+     · 组件与样式**不得**出现字面色值（#hex / rgb() / 颜色关键字），
+       一切颜色只经由 --c-* 令牌引用；
+     · 图表（SVG）以 class + CSS 变量着色，禁止在属性里写颜色；
+     · 颜色类令牌在 [data-theme="dark"] / [data-theme="light"] 各定义一份；
+       非颜色类令牌（字体、间距、圆角、阴影之外的量）与主题无关，只定义一次。
+
+   色板方向稿见开发文档 §7：暗色为「夜间实验记录本」——铁胆墨底 + 黄铜 + 铜绿
+   + 印泥红；亮色为「日间纸白版」，同色系加深，共用同一套组件与布局。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. 与主题无关的令牌
+   -------------------------------------------------------------------------- */
+
+:root {
+  /* 字体角色（开发文档 §7）：衬线体读数、系统黑体正文、等宽体全部时间戳 */
+  --font-body:
+    system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans SC', 'Source Han Sans SC', sans-serif;
+  --font-readout:
+    'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', 'SimSun', Georgia,
+    'Times New Roman', serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
+
+  /* 字号阶（正文 16px 起，最小 12px；手机端不作缩放之外的任何折算） */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-base: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
+  --fs-3xl: 36px;
+
+  /* 字重阶 */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* 行高 */
+  --lh-tight: 1.25;
+  --lh-snug: 1.4;
+  --lh-base: 1.6;
+  --lh-loose: 1.8;
+
+  /* 字距（中文标签的疏排、读数标题的收排） */
+  --ls-tight: -0.01em;
+  --ls-normal: 0;
+  --ls-wide: 0.14em;
+
+  /* 间距阶（4 / 8 节奏） */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* 圆角阶 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* 缓动与时长（§7 要求；微交互 140–220ms，复杂过渡 ≤360ms）
+     --dur-stamp / --ease-stamp 预留给打卡印章——全应用唯一的仪式性动效
+     （阶段 3 使用），阶段 1 不引用，但名字先定死。 */
+  --dur-instant: 80ms;
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 360ms;
+  --dur-stamp: 520ms;
+
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0.06, 0.68, 0.19);
+  --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1);
+  --ease-stamp: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* 层叠阶 */
+  --z-base: 0;
+  --z-panel: 10;
+  --z-sticky: 20;
+  --z-dropdown: 40;
+  --z-overlay: 100;
+  --z-toast: 1000;
+
+  /* 版式与控件尺寸 */
+  --layout-max: 1080px;
+  --layout-measure: 68ch;
+  --control-h: 44px; /* 触控目标下限 */
+  --control-h-sm: 32px;
+  --grid-cell: 24px; /* 方格纸网格边长 */
+
+  /* 热力图色阶档数（阶段 6 使用；此处只固定档数，避免届时改名） */
+  --heat-levels: 5;
+}
+
+/* 尊重 prefers-reduced-motion（需求文档 §4 无障碍）。
+   注意：时长令牌只在上面这一处定义、不随主题变化，因此这里用 :root 覆盖即可。
+   若日后有人把 --dur-* 挪进主题块，这条会失效——勿挪。 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 0ms;
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+    --dur-stamp: 0ms;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   2. 暗色主题 —— 夜间实验记录本（默认）
+   --------------------------------------------------------------------------
+   选择器含 :root:not([data-theme])：在 JS 落主题属性之前（以及 JS 不可用时）
+   沿用暗色，避免首帧白闪。
+   -------------------------------------------------------------------------- */
+
+[data-theme='dark'],
+:root:not([data-theme]) {
+  color-scheme: dark;
+
+  /* 背景与面板 */
+  --c-bg: #0b111a; /* 铁胆墨底 */
+  --c-bg-sunken: #070c13; /* 下沉面：输入框、代码块、表格斑马 */
+  --c-panel: #111a25;
+  --c-panel-raised: #16202d;
+  --c-scrim: rgba(7, 12, 19, 0.62);
+
+  /* 墨色（文字与图标） */
+  --c-ink: #e6e9ee; /* 14.4:1 on --c-bg */
+  --c-ink-muted: #a7b2c4; /*  8.5:1 */
+  --c-ink-faint: #7c8aa0; /*  5.2:1 —— 占位符、禁用态的下限 */
+
+  /* 线条与网格 */
+  --c-border: rgba(230, 233, 238, 0.1);
+  --c-border-strong: rgba(230, 233, 238, 0.2);
+  --c-grid: rgba(154, 166, 184, 0.07); /* 方格纸细线 */
+  --c-grid-strong: rgba(154, 166, 184, 0.14); /* 方格纸每 5 格的粗线 */
+  --c-glow: rgba(217, 164, 65, 0.06); /* 顶部黄铜微光 */
+
+  /* 主色 · 黄铜（仪器指示灯） */
+  --c-primary: #d9a441;
+  --c-primary-text: #d9a441; /*  8.1:1 on --c-bg */
+  --c-on-primary: #1a1206; /*  8.3:1 on --c-primary */
+  --c-primary-soft: rgba(217, 164, 65, 0.14);
+
+  /* 成功 / 按期 · 铜绿 */
+  --c-success: #5fa89b;
+  --c-success-text: #6fb8aa; /* 提高一档，保证小字 ≥4.5:1 */
+  --c-on-success: #07120f;
+  --c-success-soft: rgba(95, 168, 155, 0.14);
+
+  /* 逾期 / 印章 · 印泥红 */
+  --c-overdue: #c4553d; /* 印泥红本体：印章、填充、描边（方向稿原值） */
+  --c-overdue-text: #de765d; /* 文字专用：小字在标记底/墨底上均 ≥4.9:1 */
+  --c-on-overdue: #fdf6f2;
+  --c-overdue-soft: rgba(196, 85, 61, 0.16);
+
+  /* 印章本体（§7：暗色印泥红 / 亮色另调，故与 --c-overdue 分开命名） */
+  --c-stamp: #c4553d;
+
+  /* 焦点环 */
+  --c-focus: #d9a441;
+
+  /* 阴影阶（暗色下靠深黑拉开层次） */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
+  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  /* 热力图色阶：铜绿 → 黄铜 5 级（阶段 6）；0 = 无记录，rest = 休息日灰档 */
+  --c-heat-0: rgba(154, 166, 184, 0.09);
+  --c-heat-1: #2c5a52;
+  --c-heat-2: #427f6e;
+  --c-heat-3: #82995a;
+  --c-heat-4: #b09c4c;
+  --c-heat-5: #d9a441;
+  --c-heat-rest: #39414d;
+}
+
+/* --------------------------------------------------------------------------
+   3. 亮色主题 —— 日间纸白版（同色系加深）
+   -------------------------------------------------------------------------- */
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --c-bg: #f5f2ea; /* 纸白底 */
+  --c-bg-sunken: #ebe7dc;
+  --c-panel: #fcfaf5;
+  --c-panel-raised: #ffffff;
+  --c-scrim: rgba(26, 34, 46, 0.38);
+
+  --c-ink: #1a222e; /* 14.3:1 on --c-bg */
+  --c-ink-muted: #4a5568; /*  6.7:1 */
+  --c-ink-faint: #5c6673; /*  4.7:1（对输入框底 --c-bg-sunken 的最不利组合） */
+
+  --c-border: rgba(26, 34, 46, 0.12);
+  --c-border-strong: rgba(26, 34, 46, 0.24);
+  --c-grid: rgba(26, 34, 46, 0.06);
+  --c-grid-strong: rgba(26, 34, 46, 0.12);
+  --c-glow: rgba(217, 164, 65, 0.12);
+
+  --c-primary: #8a6212; /* 黄铜加深 */
+  --c-primary-text: #7a560f; /*  5.6:1 on --c-bg */
+  --c-on-primary: #fcfaf5; /*  4.9:1 on --c-primary */
+  --c-primary-soft: rgba(138, 98, 18, 0.12);
+
+  --c-success: #2f6f63; /* 铜绿加深 */
+  --c-success-text: #2a6459;
+  --c-on-success: #f7fbfa;
+  --c-success-soft: rgba(47, 111, 99, 0.12);
+
+  --c-overdue: #a93b24; /* 印泥红加深 */
+  --c-overdue-text: #9c3620;
+  --c-on-overdue: #fdf6f2;
+  --c-overdue-soft: rgba(169, 59, 36, 0.12);
+
+  --c-stamp: #a93b24;
+
+  --c-focus: #8a6212;
+
+  --shadow-xs: 0 1px 2px rgba(26, 34, 46, 0.08);
+  --shadow-sm: 0 2px 6px rgba(26, 34, 46, 0.1);
+  --shadow-md: 0 8px 24px rgba(26, 34, 46, 0.12);
+  --shadow-lg: 0 18px 48px rgba(26, 34, 46, 0.16);
+  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
+  --c-heat-0: rgba(26, 34, 46, 0.07);
+  --c-heat-1: #b7cfc9;
+  --c-heat-2: #86b3a7;
+  --c-heat-3: #b3ab6a;
+  --c-heat-4: #cfae55;
+  --c-heat-5: #b8871f;
+  --c-heat-rest: #c9ceda;
+}
