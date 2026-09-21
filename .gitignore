@@ -1,0 +1,16 @@
+# 运行时数据（唯一持久文件是 data/app.db，复制/快照即备份）
+data/
+
+# 依赖
+node_modules/
+
+# 前端构建产物
+dist/
+.vite/
+
+# 系统杂物
+.DS_Store
+*.log
+
+# 开发工具 archify 的依赖（由 .agents/skills/archify/package-lock.json 还原）
+.agents/skills/archify/node_modules/
