@@ -15,6 +15,7 @@
     "start": "tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:browser": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -26,7 +27,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "1.60.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.2",
