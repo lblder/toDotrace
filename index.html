@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TodoAgent · 每日打卡工作台</title>
+    <!--
+      CSP 由服务端以响应头下发（ADR-008 §6），不在此处用 meta 声明：
+      dev server 的 HMR 需要内联脚本与 websocket，meta CSP 会把它一起挡掉。
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
