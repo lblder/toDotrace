@@ -15,7 +15,7 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "types": ["node", "vitest/globals"],
-    "baseUrl": ".",
+    // TypeScript 7 移除了 baseUrl：paths 现以本文件所在目录为基准解析。
     "paths": {
       "@shared/*": ["./shared/*"]
     }
