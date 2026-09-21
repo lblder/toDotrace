@@ -1,0 +1,216 @@
+import type { Config } from '../config.js'
+import type { Db } from '../db/index.js'
+import { conflict, inviteInvalid, invalidCredentials, locked } from '../lib/errors.js'
+import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../lib/password.js'
+import { isExpired, isoAfterMs, nowIso } from '../lib/time.js'
+import { generateSecret, hashSecret } from '../lib/token.js'
+import { uuidv7 } from '../lib/uuid.js'
+import type { LoginThrottle } from './login-throttle.js'
+import { findInviteByCodeHash, insertInvite, markInviteUsed } from '../repo/invites.js'
+import { insertSession, deleteSessionByTokenHash } from '../repo/sessions.js'
+import {
+  findUserById,
+  findUserByUsername,
+  insertUser,
+  ownerExists,
+  toPublicUser,
+  touchLastSeen,
+  type PublicUser,
+  type UserRow,
+} from '../repo/users.js'
+
+/**
+ * 账号域逻辑：首启引导、登录、登出、凭邀请码注册、签发邀请码。
+ *
+ * 路由层保持薄——这里不碰 req / res，只接收已经过 zod 校验的入参。
+ */
+
+export interface AuthSuccess {
+  user: PublicUser
+  token: string
+}
+
+/** 令牌明文只在此处产生、只在签发响应里出现一次；库中只存 SHA-256（ADR-008 §4）。 */
+function issueSession(db: Db, config: Config, user: UserRow): { token: string; expiresAt: string } {
+  const token = generateSecret()
+  const now = nowIso()
+  const expiresAt = isoAfterMs(config.sessionTtlMs)
+  insertSession(db, {
+    id: uuidv7(),
+    userId: user.id,
+    tokenHash: hashSecret(token),
+    createdAt: now,
+    expiresAt,
+  })
+  return { token, expiresAt }
+}
+
+/**
+ * 首启引导建 owner（ADR-008 §2）：**仅当库中无 owner 时可用**。
+ * 检查在事务内双重执行——并发的两个引导请求只会成功一个。
+ */
+export async function createOwner(
+  db: Db,
+  config: Config,
+  input: { username: string; password: string; displayName: string },
+): Promise<AuthSuccess> {
+  // 慢哈希放在事务外：不把 ~50ms 的 CPU 时间按在写锁上。
+  const passwordHash = await hashPassword(input.password)
+  const id = uuidv7()
+  const createdAt = nowIso()
+
+  const create = db.transaction((): UserRow => {
+    if (ownerExists(db)) {
+      throw conflict('conflict/owner-exists', '已完成初始化，不能重复创建所有者')
+    }
+    insertUser(db, {
+      id,
+      username: input.username,
+      displayName: input.displayName,
+      role: 'owner',
+      passwordHash,
+      createdAt,
+    })
+    const created = findUserById(db, id)
+    if (!created) throw new Error('创建所有者后读取失败')
+    return created
+  })
+
+  const user = create()
+  const { token } = issueSession(db, config, user)
+  return { user: toPublicUser(user), token }
+}
+
+/**
+ * 登录（含防爆破，ADR-008 §5）。
+ * 用户名不存在时也走一次同等开销的假校验，抹平「账号是否存在」的时序差异。
+ */
+export async function login(
+  db: Db,
+  config: Config,
+  throttle: LoginThrottle,
+  input: { username: string; password: string },
+): Promise<AuthSuccess> {
+  const lockedForMs = throttle.lockedForMs(input.username)
+  if (lockedForMs !== null) {
+    throw locked(Math.ceil(lockedForMs / 1000))
+  }
+
+  const user = findUserByUsername(db, input.username)
+  let ok = false
+  if (user) {
+    ok = await verifyPassword(input.password, user.password_hash)
+  } else {
+    await verifyPassword(input.password, DUMMY_PASSWORD_HASH)
+  }
+
+  if (!user || !ok) {
+    throttle.recordFailure(input.username)
+    throw invalidCredentials()
+  }
+
+  throttle.recordSuccess(input.username)
+
+  touchLastSeen(db, user.id, nowIso())
+
+  const { token } = issueSession(db, config, user)
+  return { user: toPublicUser(user), token }
+}
+
+/**
+ * 凭邀请码注册（架构文档 §3.2 注册闸门）。
+ * 邀请码有效性先于用户名冲突检查——没有有效邀请码的人不该能探测用户名是否被占用。
+ */
+export async function registerWithInvite(
+  db: Db,
+  config: Config,
+  input: { username: string; password: string; displayName: string; inviteCode: string },
+): Promise<AuthSuccess> {
+  const codeHash = hashSecret(input.inviteCode)
+  const invite = findInviteByCodeHash(db, codeHash)
+  if (!invite) throw inviteInvalid()
+  if (invite.used_by !== null) throw conflict('conflict/invite-used', '邀请码已被使用')
+  if (isExpired(invite.expires_at)) throw inviteInvalid('邀请码已过期')
+
+  const passwordHash = await hashPassword(input.password)
+  const id = uuidv7()
+  const createdAt = nowIso()
+
+  const create = db.transaction((): UserRow => {
+    // 事务内复核：并发使用时只有一个能占住邀请码。
+    const fresh = findInviteByCodeHash(db, codeHash)
+    if (!fresh) throw inviteInvalid()
+    if (fresh.used_by !== null) throw conflict('conflict/invite-used', '邀请码已被使用')
+    if (isExpired(fresh.expires_at)) throw inviteInvalid('邀请码已过期')
+
+    if (findUserByUsername(db, input.username)) {
+      throw conflict('conflict/username-taken', '用户名已被占用')
+    }
+
+    insertUser(db, {
+      id,
+      username: input.username,
+      displayName: input.displayName,
+      role: 'member',
+      passwordHash,
+      createdAt,
+    })
+    if (!markInviteUsed(db, fresh.id, id, createdAt)) {
+      throw conflict('conflict/invite-used', '邀请码已被使用')
+    }
+    const created = findUserById(db, id)
+    if (!created) throw new Error('创建成员后读取失败')
+    return created
+  })
+
+  let user: UserRow
+  try {
+    user = create()
+  } catch (error) {
+    // 并发下用户名唯一约束兜底（UNIQUE 冲突 → 409，而不是 500）。
+    if (isUniqueConstraintError(error)) {
+      throw conflict('conflict/username-taken', '用户名已被占用')
+    }
+    throw error
+  }
+
+  const { token } = issueSession(db, config, user)
+  return { user: toPublicUser(user), token }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string' &&
+    (error as { code: string }).code.startsWith('SQLITE_CONSTRAINT')
+  )
+}
+
+/** 登出：立即删除该会话行（ADR-008 §5）。 */
+export function logout(db: Db, token: string): void {
+  deleteSessionByTokenHash(db, hashSecret(token))
+}
+
+export interface IssuedInvite {
+  id: string
+  code: string
+  expiresAt: string
+}
+
+/** 签发邀请码：明文 code 只在本次响应出现一次，库中只存 SHA-256（ADR-008 §4）。 */
+export function issueInvite(db: Db, config: Config, ownerId: string, expiresInDays?: number): IssuedInvite {
+  const code = generateSecret()
+  const id = uuidv7()
+  const createdAt = nowIso()
+  const expiresAt = isoAfterMs(expiresInDays === undefined ? config.inviteTtlMs : expiresInDays * 24 * 60 * 60 * 1000)
+  insertInvite(db, {
+    id,
+    codeHash: hashSecret(code),
+    issuedBy: ownerId,
+    createdAt,
+    expiresAt,
+  })
+  return { id, code, expiresAt }
+}
