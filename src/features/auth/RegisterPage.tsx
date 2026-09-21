@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRegister } from '../../hooks/use-auth'
 import { useRoute } from '../../hooks/use-route'
@@ -56,6 +56,8 @@ export function RegisterPage() {
   const [password, setPassword] = useState('')
   const [errors, setErrors] = useState<FieldErrors<FieldName>>({})
   const [banner, setBanner] = useState<string | null>(null)
+  /** 服务端把错误指到了哪个字段——等这一轮请求结束再把焦点送过去 */
+  const [focusRequest, setFocusRequest] = useState<FieldName | null>(null)
 
   const inviteRef = useRef<HTMLInputElement>(null)
   const usernameRef = useRef<HTMLInputElement>(null)
@@ -67,6 +69,18 @@ export function RegisterPage() {
     displayName: displayNameRef,
     password: passwordRef,
   }
+
+  /**
+   * 把焦点送到出错的字段上。**必须等请求结束、输入框重新可用之后再聚焦**：
+   * 请求进行中输入框是 disabled 的，而 disabled 元素上的 focus() 会被浏览器
+   * 直接忽略——同步调用是一个静默的空操作，焦点最后停在 body 上
+   * （真机上复现过：focus() 调用时 disabled 仍为 true）。
+   */
+  useEffect(() => {
+    if (focusRequest === null || register.isPending) return
+    refs[focusRequest].current?.focus()
+    setFocusRequest(null)
+  }, [focusRequest, register.isPending])
 
   /** 编辑某字段：写入值、撤掉它的旧错误、清掉上一次的服务端横幅 */
   function edit(field: FieldName, set: (value: string) => void) {
@@ -115,7 +129,7 @@ export function RegisterPage() {
           next[field] = message
           setErrors(next)
           setBanner(null)
-          refs[field].current?.focus()
+          setFocusRequest(field)
         },
       },
     )

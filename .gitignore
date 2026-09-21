@@ -8,6 +8,12 @@ node_modules/
 dist/
 .vite/
 
+# 浏览器测试产物（playwright）
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # 系统杂物
 .DS_Store
 *.log
