@@ -9,10 +9,12 @@
  *   project.ts    纯函数重放：排定边界 → 按 id 升序 → 折叠
  *   append.ts     追加（调用方开事务）+ 增量投影（同事务）
  *   rebuild.ts    全量重建（安全网）
+ *   data-migration.ts 启动时的数据迁移（ADR-010 §7：给存量账号补 settings/updated）
  *   settings.ts   账号设置的读取与初始化事件（**只读投影，不写投影表**）
  */
 
 export { appendEvents, classifyMaintenance } from './append.js'
+export { backfillAccountSettings } from './data-migration.js'
 export { readAccountEvents, findEvent, readMaxEventId } from './event-store.js'
 export { project, canonicalizeProjection } from './project.js'
 export { readProjection } from './projection-store.js'

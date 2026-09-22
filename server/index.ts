@@ -1,11 +1,12 @@
 import { createApp } from './app.js'
 import { loadConfig } from './config.js'
 import { closeDb, getDb, initializeDatabase } from './db/index.js'
+import { backfillAccountSettings } from './events/data-migration.js'
 
 /**
  * 服务端入口（开发文档 §1：单进程，静态托管与 API 同源）。
  *
- * 启动顺序：读配置 → 开库（连接即开 WAL 与外键）→ 建表/迁移 → 起 HTTP。
+ * 启动顺序：读配置 → 开库（连接即开 WAL 与外键）→ 建表/迁移 → **数据迁移** → 起 HTTP。
  * 任何一步失败都直接退出并打印原因，不做「带病启动」。
  */
 function main(): void {
@@ -13,6 +14,14 @@ function main(): void {
 
   initializeDatabase(config.dbPath)
   const db = getDb()
+
+  // 数据迁移（ADR-010 §7）：模式迁移是纯 DDL，补领域事实是事件层的职责，故分两步。
+  // 为存量账号补写 settings/updated——时区取**此刻**的服务端本地时区，此后不再重算。
+  // 幂等：判据是事件存在性，重复启动不会写出第二条。
+  const backfilled = backfillAccountSettings(db)
+  if (backfilled.length > 0) {
+    console.log(`数据迁移：为 ${backfilled.length} 个存量账号补写了初始化设置事件`)
+  }
 
   const app = createApp({ db, config })
   let startupFailed = false
