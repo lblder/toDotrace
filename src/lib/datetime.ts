@@ -18,6 +18,19 @@ export function formatInstant(iso: string): string {
   )
 }
 
+/**
+ * ISO-8601 → 「9:12」（本地时区，24 小时制，小时不补零）。
+ *
+ * 用于印章与「你今天 9:12 已经打过卡了」这类**同一天之内**的提示：
+ * 那里日期是废话，用户只关心时刻。跨天的场合仍用 formatInstant。
+ * 同样不做任何日期折算，解析不了就原样返回。
+ */
+export function formatClock(iso: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return iso
+  return `${at.getHours()}:${pad(at.getMinutes())}`
+}
+
 /** 该瞬间是否已经过去。解析不了按「未过期」处理，宁可少报错。 */
 export function isPastInstant(iso: string, now: number = Date.now()): boolean {
   const at = new Date(iso).getTime()

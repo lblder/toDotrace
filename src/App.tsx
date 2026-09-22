@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import { LoginPage } from './features/auth/LoginPage'
 import { RegisterPage } from './features/auth/RegisterPage'
 import { SetupOwnerPage } from './features/auth/SetupOwnerPage'
+import { CheckinPage } from './features/checkin/CheckinPage'
 import { BootScreen, ServiceUnavailableScreen } from './features/common/StatusScreen'
 import { HomePage } from './features/home/HomePage'
 import { InvitesPage } from './features/invites/InvitesPage'
@@ -22,11 +23,12 @@ const SCREENS: Readonly<Record<RouteName, () => ReactElement | null>> = {
   login: LoginPage,
   register: RegisterPage,
   home: HomePage,
+  checkin: CheckinPage,
   invites: InvitesPage,
 }
 
 /** 登录后才有外壳（顶栏 + 导航）；账号三页自带整屏版式，不套壳 */
-const SHELLED: ReadonlySet<RouteName> = new Set<RouteName>(['home', 'invites'])
+const SHELLED: ReadonlySet<RouteName> = new Set<RouteName>(['home', 'checkin', 'invites'])
 
 export function App() {
   const { route, navigate } = useRoute()

@@ -1,3 +1,4 @@
+import { compareDayKey } from '@shared/time'
 import { ANCHOR_TYPE, REVOKE_TYPE } from './definitions/system.js'
 import { getEventDefinition } from './registry.js'
 import type { Event, Projection } from './types.js'
@@ -16,9 +17,10 @@ import type { Event, Projection } from './types.js'
  *   3. **折叠**：跳过被撤销批次内的事件，逐条调用其 `EventDefinition.apply`。
  */
 export function project(events: readonly Event[]): Projection {
-  // 空流水的投影 = 「什么都没发生过」：模板为空，设置**未设置**（null，不是默认值）。
+  // 空流水的投影 = 「什么都没发生过」：模板为空，设置**未设置**（null，不是默认值），
+  // 打卡日为空（无行 = 无到达 = 休息日，ADR-012 §2/§5）。
   // 默认值属于读取方的回落策略，`project()` 若在这里填默认值就得读服务端时区。
-  const projection: Projection = { templates: [], settings: null }
+  const projection: Projection = { templates: [], settings: null, days: [] }
   if (events.length === 0) return projection
 
   assertSingleAccount(events)
@@ -64,15 +66,21 @@ export function project(events: readonly Event[]): Projection {
 }
 
 /**
- * 把投影的数组顺序规范化成**模板 id 升序**。
+ * 把投影的数组顺序规范化：模板按 **id 升序**、打卡日按 **dayKey 升序**。
  *
  * 折叠顺序是「事件 id」序，删除会让数组出现空位、更新会原地替换，
  * 于是同一份状态可以有多种数组顺序。若不规范化，「增量维护」与「全量重建」
  * 两条路径产出的对象会在顺序上不同，ADR-010 §5 要求的「两者结果必须一致」
  * 就无法逐字段断言（只能比较排序后的副本，等于把不变式测松了）。
+ *
+ * 打卡日按 `dayKey` 升序还有第二个用途：ADR-012 §6 要求 `shared/checkin` 的入参
+ * `dayKeys`「已升序、已去重」，而投影是它唯一被保证的来源（§3 的 `/days` 也返回升序）。
+ * 比较走 `@shared/time` 的 `compareDayKey`——**不引入本层自己的日期比较**
+ * （§约束「所有归属日折算经 shared/time」）。
  */
 export function canonicalizeProjection(projection: Projection): void {
   projection.templates.sort((a, b) => compareIds(a.id, b.id))
+  projection.days.sort((a, b) => compareDayKey(a.dayKey, b.dayKey))
 }
 
 /**

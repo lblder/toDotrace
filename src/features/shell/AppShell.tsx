@@ -18,6 +18,8 @@ interface NavItem {
 }
 
 const NAV: readonly NavItem[] = [
+  // 打卡排在最前：它是每天的例行动作，也是全应用的签名交互（03 §7）
+  { route: 'checkin', label: '打卡', ownerOnly: false },
   { route: 'home', label: '工作台', ownerOnly: false },
   { route: 'invites', label: '邀请码', ownerOnly: true },
 ]

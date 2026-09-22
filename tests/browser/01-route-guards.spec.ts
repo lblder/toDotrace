@@ -16,7 +16,14 @@ import { startStack, type Stack } from './harness/stack'
  * 两套栈各有自己的临时库与端口，互不影响。
  */
 
-const ROUTES: readonly RouteName[] = ['home', 'setup', 'login', 'register', 'invites']
+const ROUTES: readonly RouteName[] = [
+  'home',
+  'checkin',
+  'setup',
+  'login',
+  'register',
+  'invites',
+]
 
 let fresh: Stack
 let seeded: Stack
@@ -54,6 +61,7 @@ test.describe('未就绪（空库）', () => {
 test.describe('已就绪 · 未登录', () => {
   const expected: Readonly<Record<RouteName, RouteName>> = {
     home: 'login',
+    checkin: 'login',
     setup: 'login',
     login: 'login',
     // 注册是唯一对未登录开放的页面（凭邀请码，无鉴权）
@@ -76,6 +84,7 @@ test.describe('已就绪 · 未登录', () => {
 test.describe('已登录 · owner', () => {
   const expected: Readonly<Record<RouteName, RouteName>> = {
     home: 'home',
+    checkin: 'checkin',
     setup: 'home',
     login: 'home',
     register: 'home',
@@ -98,6 +107,8 @@ test.describe('已登录 · owner', () => {
 test.describe('已登录 · member', () => {
   const expected: Readonly<Record<RouteName, RouteName>> = {
     home: 'home',
+    // 打卡是每个账号自己的事，不分角色
+    checkin: 'checkin',
     setup: 'home',
     login: 'home',
     register: 'home',
@@ -164,6 +175,23 @@ test.describe('深链接刷新', () => {
     // 这套栈里 seedMember 用过一枚码，所以列表必然有一条记录。
     await expect(page.getByRole('heading', { name: '签发记录' })).toBeVisible()
     await expect(page.locator('.ta-invites__item')).toHaveCount(1)
+  })
+
+  test('owner 刷新 #/checkin 留在原地，今日状态真的取到了', async ({ page }) => {
+    await slowSession(page)
+    await trackHashTrail(page)
+    await signInAs(page, ownerToken)
+    await gotoHash(page, seeded.baseUrl, HASH.checkin)
+
+    await expectScreen(page, 'checkin')
+
+    // 与 #/invites 那条同一个回归：守卫没有先改写、再改回来
+    expect(await hashTrail(page)).toEqual([HASH.checkin])
+
+    // 「页面还在」不只是标题在：今日状态要真的从服务端取回来。
+    // 这位 owner 在本文件里从没打过卡，所以今天必然呈现为休息日——
+    // 停在「正在读取今日状态…」的话这条会失败。
+    await expect(page.locator('.ta-checkin__restMain')).toHaveText('今天偷偷懒')
   })
 
   test('member 刷新 #/invites 被送到 #/（该页 owner 专属）', async ({ page }) => {

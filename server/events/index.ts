@@ -3,6 +3,7 @@
  *
  * 分层：
  *   definitions/  事件类型定义（schema + apply）——**注册表的唯一来源**
+ *                 （system / settings / recurrence / checkin 四组）
  *   registry.ts   注册表：未登记的 type 一律拒绝
  *   event-store.ts     events 表读写
  *   projection-store.ts 投影表读写（**全仓唯一写投影表的地方**）
@@ -39,6 +40,15 @@ export {
   settingsUpdatedPayloadSchema,
   type SettingsUpdatedPayload,
 } from './definitions/settings.js'
+export {
+  CHECKIN_ARRIVED_TYPE,
+  CHECKIN_LEFT_TYPE,
+  checkinArrivedDefinition,
+  checkinEventDefinitions,
+  checkinLeftDefinition,
+  checkinPayloadSchema,
+  type CheckinPayload,
+} from './definitions/checkin.js'
 export {
   RECURRENCE_TEMPLATE_TARGET_KIND,
   eventToCompletion,

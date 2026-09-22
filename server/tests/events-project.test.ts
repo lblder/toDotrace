@@ -166,7 +166,8 @@ describe('project() 是纯函数（ADR-010 §4 硬约束）', () => {
   it('空流水 → 空投影；设置是 null 而不是「默认值」', () => {
     // 填默认值就得读服务端时区（`serverTimeZone()`），`project()` 当场不再是纯函数。
     // 「缺设置时用哪个时区」属于读取方（`loadAccountSettings`）的回落策略。
-    expect(project([])).toEqual({ templates: [], settings: null })
+    // 打卡日同理：空流水 = 一行都没有 = 每天都是休息日（ADR-012 §2/§5）。
+    expect(project([])).toEqual({ templates: [], settings: null, days: [] })
   })
 })
 
@@ -308,7 +309,7 @@ describe('第 1 步：撤销（ADR-006 / ADR-010 §4）', () => {
 describe('系统事件（ADR-010 §7）', () => {
   it('两类系统事件都不写投影表', () => {
     const events = [anchor('b1'), revoke('b2', 'b3')]
-    expect(project(events)).toEqual({ templates: [], settings: null })
+    expect(project(events)).toEqual({ templates: [], settings: null, days: [] })
   })
 
   it('系统事件已登记（否则 §2 的「未登记拒绝写入」与 §4 的边界扫描会互相打死）', () => {

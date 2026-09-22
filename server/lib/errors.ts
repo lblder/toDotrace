@@ -22,6 +22,7 @@ export type ErrorCode =
   | 'conflict/owner-exists'
   | 'conflict/username-taken'
   | 'conflict/invite-used'
+  | 'conflict/not-arrived'
   | 'invite/invalid'
   | 'not-found'
   | 'server/internal-error'
@@ -61,6 +62,20 @@ export const locked = (retryAfterSeconds: number): ApiError =>
 export const notFound = (message = '资源不存在'): ApiError => new ApiError(404, 'not-found', message)
 
 export const conflict = (code: ErrorCode, message: string): ApiError => new ApiError(409, code, message)
+
+/**
+ * **账户从无到达**却要记录离开（ADR-012 §3 失败路径表 / §5 分流表，
+ * 码已登记进 ADR-008 §8 错误码清单）。
+ *
+ * 它是**状态约束**而非「此操作被禁止」：离开必须配对一次到达，
+ * 没有可配对的到达时服务端无法知道该把这次离开记在哪一天
+ * （归属日取自所配对的到达，§5）——凭空记一天就是伪造事实。
+ *
+ * 分流键是「**有无到达**」而不是「有无未闭合的到达」：已经有到达、只是已闭合，
+ * 那是重试/重复点击，走幂等（`created: false`），**不报这个错**。
+ */
+export const notArrived = (): ApiError =>
+  new ApiError(409, 'conflict/not-arrived', '当前账号还没有任何到达记录，无法记录离开')
 
 /** 邀请码不存在 / 已过期：400（语义非法），不区分两者以免成为探测手段。 */
 export const inviteInvalid = (message = '邀请码无效或已过期'): ApiError =>

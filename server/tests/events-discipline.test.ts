@@ -70,6 +70,13 @@ describe('投影表只有一个写入方（ADR-010 §约束）', () => {
     expect(writersOf('settings')).toEqual(['events/projection-store.ts'])
   })
 
+  it('days 只被 projection-store.ts 写（ADR-012 §2/§4：打卡的投影更新只能由事件层执行）', () => {
+    // ADR-012 §4 item 2 把这条纪律点名施加给打卡：**路由不得绕过事件层直接写投影表**。
+    // 打卡是第一个从路由层调 appendEvents 的功能，「顺手 UPDATE 一下 days」
+    // 正是这条纪律在真实项目里失效的方式——而它在这里会被源码扫描挡下。
+    expect(writersOf('days')).toEqual(['events/projection-store.ts'])
+  })
+
   it('events 只被 event-store.ts 写，且只 INSERT——事件不可变（ADR-001 地基）', () => {
     expect(writersOf('events')).toEqual(['events/event-store.ts'])
     const store = stripComments(
@@ -123,6 +130,10 @@ describe('注册表（ADR-010 §2）', () => {
       'system/overwrite-anchor': ['apply', 'schema', 'type'],
       'system/revoke': ['apply', 'schema', 'type'],
       'settings/updated': ['apply', 'schema', 'type'],
+      // 打卡事件（ADR-012 §1）：载荷为空对象，落点是「归属日」而非某个对象，
+      // 故两列 target 为 NULL——与设置事件同类。
+      'checkin/arrived': ['apply', 'schema', 'type'],
+      'checkin/left': ['apply', 'schema', 'type'],
       // 四类重复事件的载荷都带 templateId，落点由载荷派生（ADR-010 §2）
       'recurrence/template-created': ['apply', 'schema', 'target', 'type'],
       'recurrence/template-updated': ['apply', 'schema', 'target', 'type'],
@@ -175,7 +186,7 @@ describe('注册表（ADR-010 §2）', () => {
   })
 })
 
-describe('模式 v2（ADR-010 §1 / §6、ADR-011 §1）', () => {
+describe('模式 v3（ADR-010 §1 / §6、ADR-011 §1、ADR-012 §2）', () => {
   let dir: string
 
   beforeAll(() => {
@@ -206,7 +217,7 @@ describe('模式 v2（ADR-010 §1 / §6、ADR-011 §1）', () => {
       .sort()
   }
 
-  it('全新库一次迁到 v2，三张 v2 表与索引都在', () => {
+  it('全新库一次迁到最新版，各版的表与索引都在', () => {
     const db = freshDb('v0.db')
     try {
       expect(getSchemaVersion(db)).toBe(0)
@@ -215,11 +226,21 @@ describe('模式 v2（ADR-010 §1 / §6、ADR-011 §1）', () => {
         db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as { name: string }[]
       ).map((row) => row.name)
       expect(tables).toEqual(
-        expect.arrayContaining(['events', 'recurrence_templates', 'settings', 'users', 'sessions', 'invites']),
+        expect.arrayContaining([
+          'events',
+          'recurrence_templates',
+          'settings',
+          'days',
+          'users',
+          'sessions',
+          'invites',
+        ]),
       )
       expect(indexNames(db, 'events')).toEqual(['idx_events_batch', 'idx_events_target'])
       expect(indexNames(db, 'recurrence_templates')).toEqual(['idx_templates_account'])
-      expect(getSchemaVersion(db)).toBe(2)
+      // days 没有额外索引：主键 (account_id, day_key) 自己就是范围查询的索引
+      expect(indexNames(db, 'days')).toEqual([])
+      expect(getSchemaVersion(db)).toBe(SCHEMA_VERSION)
     } finally {
       db.close()
     }
@@ -239,6 +260,8 @@ describe('模式 v2（ADR-010 §1 / §6、ADR-011 §1）', () => {
       // UNIQUE constraint failed: recurrence_templates.id。
       expect(pkColumns(db, 'recurrence_templates')).toEqual(['account_id', 'id'])
       expect(pkColumns(db, 'settings')).toEqual(['account_id'])
+      // ADR-012 §2：一天一行（账号 + 归属日），与 events / templates 同一形态
+      expect(pkColumns(db, 'days')).toEqual(['account_id', 'day_key'])
     } finally {
       db.close()
     }
@@ -288,7 +311,39 @@ describe('模式 v2（ADR-010 §1 / §6、ADR-011 §1）', () => {
     }
   })
 
-  it('外键级联：删账号 → 它的事件、模板、设置一并消失', () => {
+  it('days 的「每行必有到达」是**结构**保证的：没有 arrived_at 的行插不进去（ADR-012 §2）', () => {
+    const db = freshDb('days-not-null.db')
+    try {
+      migrate(db)
+      seedUser(db, 'u-d', 'userd')
+      // ADR-012 §2 的原文是「用结构保证不变式，而不是靠约定」——
+      // 这一条就是那句话的可执行形态：初稿允许的两条能产出「无到达的行」的路径
+      // （每日备注、未约束的 left）分别被删去与约束堵死，
+      // 剩下的最后一道闸门是 NOT NULL 本身。
+      expect(() =>
+        db
+          .prepare('INSERT INTO days (account_id, day_key, arrived_at, left_at) VALUES (?, ?, NULL, NULL)')
+          .run('u-d', '2026-09-22'),
+      ).toThrow(/NOT NULL/i)
+
+      // 有到达则成立，且 (account_id, day_key) 一天一行
+      const insert = db.prepare(
+        'INSERT INTO days (account_id, day_key, arrived_at, left_at) VALUES (?, ?, ?, NULL)',
+      )
+      insert.run('u-d', '2026-09-22', '2026-09-22T09:00:00+08:00')
+      expect(() => insert.run('u-d', '2026-09-22', '2026-09-22T10:00:00+08:00')).toThrow(
+        /UNIQUE|PRIMARY KEY/i,
+      )
+      const row = db.prepare('SELECT left_at FROM days WHERE account_id = ?').get('u-d') as {
+        left_at: string | null
+      }
+      expect(row.left_at).toBeNull() // 无离开记录 = 时长未知（FR1）
+    } finally {
+      db.close()
+    }
+  })
+
+  it('外键级联：删账号 → 它的事件、模板、设置、打卡日一并消失', () => {
     const db = freshDb('cascade.db')
     try {
       migrate(db)
@@ -310,9 +365,13 @@ describe('模式 v2（ADR-010 §1 / §6、ADR-011 §1）', () => {
         `INSERT INTO settings (account_id, time_zone, day_start_hour, updated_at)
          VALUES ('u-c', 'Asia/Shanghai', 4, '2026-09-22T10:00:00+08:00')`,
       ).run()
+      db.prepare(
+        `INSERT INTO days (account_id, day_key, arrived_at, left_at)
+         VALUES ('u-c', '2026-09-22', '2026-09-22T09:00:00+08:00', NULL)`,
+      ).run()
 
       db.prepare('DELETE FROM users WHERE id = ?').run('u-c')
-      for (const table of ['events', 'recurrence_templates', 'settings']) {
+      for (const table of ['events', 'recurrence_templates', 'settings', 'days']) {
         const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }
         expect(row.n, `${table} 未被级联清理`).toBe(0)
       }
@@ -321,19 +380,21 @@ describe('模式 v2（ADR-010 §1 / §6、ADR-011 §1）', () => {
     }
   })
 
-  it('v1 库升级到 v2：v1 数据保留，v2 表建起来，版本号落 2', () => {
+  it('v1 库一次升到最新版：v1 数据保留，v2/v3 的表建起来，版本号落最新', () => {
     const db = freshDb('v1.db')
     try {
-      migrate(db) // 先到 v2，再退回「只有 v1 表」的形态，模拟一台停在 v1 的库
+      migrate(db) // 先到最新版，再退回「只有 v1 表」的形态，模拟一台停在 v1 的库
       seedUser(db, 'u-v1', 'userv1')
       db.exec('DROP TABLE recurrence_templates')
       db.exec('DROP TABLE settings')
       db.exec('DROP TABLE events')
+      db.exec('DROP TABLE days')
       db.pragma('user_version = 1')
       expect(getSchemaVersion(db)).toBe(1)
 
-      expect(migrate(db)).toBe(2)
-      expect(getSchemaVersion(db)).toBe(2)
+      // v1 → v3 一步到位：逐版本升级的链条要能一次跑完（v3 只依赖 v1 的 users）
+      expect(migrate(db)).toBe(SCHEMA_VERSION)
+      expect(getSchemaVersion(db)).toBe(SCHEMA_VERSION)
       // v1 的数据没被碰
       const user = db.prepare('SELECT id FROM users WHERE id = ?').get('u-v1') as { id: string }
       expect(user.id).toBe('u-v1')
@@ -352,7 +413,7 @@ describe('模式 v2（ADR-010 §1 / §6、ADR-011 §1）', () => {
     }
   })
 
-  it('已在 v2 的库再迁一次是空操作（幂等，不重复建表）', () => {
+  it('已在最新版的库再迁一次是空操作（幂等，不重复建表）', () => {
     const db = freshDb('again.db')
     try {
       migrate(db)

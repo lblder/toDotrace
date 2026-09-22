@@ -9,4 +9,6 @@ export const queryKeys = {
   invites: ['invites', 'list'] as const,
   /** 成员列表（owner 专属，只为把邀请码的 usedBy 翻成显示名） */
   members: ['members', 'list'] as const,
+  /** 今日打卡状态：GET /api/checkin/today 的结果（{ day, streak }） */
+  checkinToday: ['checkin', 'today'] as const,
 } as const

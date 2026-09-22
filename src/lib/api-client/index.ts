@@ -10,8 +10,10 @@ export { api } from './endpoints'
 export type { Api } from './endpoints'
 export type {
   AuthPayload,
+  CheckinResult,
   CreateInvitePayload,
   CreateOwnerInput,
+  DayRow,
   ErrorEnvelope,
   InviteListPayload,
   InviteSummary,
@@ -24,5 +26,6 @@ export type {
   RegisterInput,
   Role,
   SetupStatus,
+  TodayCheckin,
   User,
 } from './types'

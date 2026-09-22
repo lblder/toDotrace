@@ -274,7 +274,9 @@ describe('事务纪律：一批次一事务（ADR-002 §1）', () => {
 
   it('投影写入同样必须在事务内', () => {
     const account = freshAccount()
-    expect(() => writeProjection(db, account, { templates: [], settings: null })).toThrow(/事务/)
+    expect(() =>
+      writeProjection(db, account, { templates: [], settings: null, days: [] }),
+    ).toThrow(/事务/)
   })
 
   it('事件与投影同生共死：事务回滚后两者都不存在', () => {
@@ -679,8 +681,8 @@ describe('账号设置：settings/updated 是 settings 表的唯一来源（ADR-
     const before = readProjection(db, account).settings
     expect(before).not.toBeNull()
 
-    // 绕过 rebuild，直接把两张投影表都清空（模拟「投影被丢弃」）
-    inTx(() => writeProjection(db, account, { templates: [], settings: null }))
+    // 绕过 rebuild，直接把各投影表都清空（模拟「投影被丢弃」）
+    inTx(() => writeProjection(db, account, { templates: [], settings: null, days: [] }))
     expect(readProjection(db, account).settings).toBeNull()
 
     rebuildProjection(db, account)

@@ -111,3 +111,45 @@ export interface MemberSummary {
 export interface MemberListPayload {
   readonly members: readonly MemberSummary[]
 }
+
+/* -------------------------------------------------------------------------
+   打卡（ADR-012 §3）—— 契约只有那四条路由，字段照抄，不假设别的
+   ------------------------------------------------------------------------- */
+
+/**
+ * 一天的打卡记录（ADR-012 §2 的 `days` 行）。
+ *
+ * `leftAt` 可空：无离开记录 = 时长未知（01 FR1），界面**不得**替它猜一个值。
+ * 每一行都必有 `arrivedAt`——这是 §2 的结构保证，故「无行 ⇔ 无到达」恒成立。
+ */
+export interface DayRow {
+  /** 归属日 'YYYY-MM-DD'，写入时按 `shared/time` 固化；凌晨到达归前一天 */
+  readonly dayKey: string
+  readonly arrivedAt: string
+  readonly leftAt: string | null
+}
+
+/**
+ * POST /api/checkin/arrive、`/api/checkin/leave` 的响应（ADR-012 §3）。
+ *
+ * `created: false` 表示**这次请求没有写入新记录**，服务端把既有状态原样返回
+ * （幂等语义：重复到达 / 重复离开都不写第二条事件）。界面据此必须说
+ * 「你今天 9:12 已经打过卡了」，而不是假装刚打上——`day.arrivedAt` 就是那次
+ * 真实到达的时刻，`created: false` 时尤其不能拿当前时间来顶替它。
+ */
+export interface CheckinResult {
+  readonly day: DayRow
+  readonly created: boolean
+}
+
+/**
+ * GET /api/checkin/today。
+ *
+ * `day === null` ⇔ 今天还没有到达记录 ⇔ 休息日（ADR-012 §5），
+ * 界面呈现为「今天偷偷懒」，不计入打卡天数——**不是错误态、不是缺失态**。
+ * 响应里没有 `isRestDay` 字段：它完全由 `day === null` 决定（v1.1 删去了这个冗余）。
+ */
+export interface TodayCheckin {
+  readonly day: DayRow | null
+  readonly streak: number
+}

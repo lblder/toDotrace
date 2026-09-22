@@ -105,7 +105,33 @@ export interface AccountSettings {
 }
 
 /**
- * 阶段 2 的投影形状（ADR-010 §3）。后续阶段向其中追加各自的键。
+ * 打卡日（ADR-012 §2 的 `days` 表）在投影里的形态。
+ *
+ * **每一行必有到达**（`arrivedAt` 非空）：`checkin/left` 对没有行的日子不建行，
+ * 于是「无行 ⇔ 无到达」恒成立——这是 ADR-012 §2 用结构（而非约定）保证的不变式，
+ * FR1 的「无到达记录 = 休息日」与 ADR-002 §3 的「打卡天数 = COUNT(*)」都由它直接成立。
+ *
+ * `accountId` 与 `ProjectedTemplate` / `AccountSettings` 同理：它**可由事件重放得出**
+ * （取自事件的 `account_id` 列），不违反「投影表中不得存放无法由事件重放得出的字段」
+ * （ADR-002 §2）；带上它是为了让 `writeProjection` 的跨账号守卫能逐行生效。
+ *
+ * `dayKey` 是**归属日**：到达取 `toDayKey(occurred_at, ctx)`，
+ * 离开取**它所闭合的那次到达的归属日**（ADR-012 §5 对 ADR-001 §4 的收窄）。
+ * 两者的时间字段都是事件的 `occurred_at`（离开可以是次日凌晨——那正是「跨零点的到访」
+ * 该有的样子，`leftAt - arrivedAt` 即时长）。
+ */
+export interface ProjectedDay {
+  accountId: string
+  dayKey: DayKey
+  /** 到达时刻（ISO 8601 带偏移）。**非空** */
+  arrivedAt: string
+  /** 离开时刻；`null` = 尚未离开（时长未知，FR1） */
+  leftAt: string | null
+}
+
+/**
+ * 阶段 2 起的投影形状（ADR-010 §3）。后续阶段向其中追加各自的键：
+ * 阶段 3 追加 `days`（ADR-012 §2）。
  */
 export interface Projection {
   /**
@@ -124,6 +150,14 @@ export interface Projection {
    * 若在这里塞默认值，`project()` 就得读服务端时区——它立刻不再是纯函数。
    */
   settings: AccountSettings | null
+  /**
+   * 打卡日（ADR-012 §2）。**数组顺序按 `dayKey` 升序规范化**——理由与模板相同：
+   * 折叠顺序是事件 id 序，不规范化就无法逐字段断言「增量 == 全量重建」（ADR-010 §5）。
+   *
+   * 顺带满足 ADR-012 §6 对 `dayKeys` 的前置条件（「已升序、已去重」）：
+   * `shared/checkin` 的三个函数吃的就是这个数组映射出的 `dayKey` 列表。
+   */
+  days: ProjectedDay[]
 }
 
 /**

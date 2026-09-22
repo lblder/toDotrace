@@ -174,7 +174,7 @@ describe('重建是安全网，不是理论存在（ADR-002 §2 / ADR-010 §5）
   it('空流水重建 = 空投影（不是错误）', () => {
     const account = freshAccount()
     rebuildProjection(db, account)
-    expect(readProjection(db, account)).toEqual({ templates: [], settings: null })
+    expect(readProjection(db, account)).toEqual({ templates: [], settings: null, days: [] })
   })
 
   it('连跑两次结果不变（重建是幂等的）', () => {

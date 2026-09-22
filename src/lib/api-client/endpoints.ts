@@ -4,11 +4,13 @@
  * ADR-008 的约束：**本 ADR 未列出的路由不得实现**（避免范围蔓延）。
  * 阶段 1 用到的就是这八条：六条账号路由，加 owner 管理面的邀请码两条；
  * `GET /api/members` 只为把邀请码的「被谁使用」翻成可读的名字。
+ * 阶段 3 加了 ADR-012 §3 的打卡三条（见文件末尾）。
  */
 
 import { request } from './client'
 import type {
   AuthPayload,
+  CheckinResult,
   CreateInvitePayload,
   CreateOwnerInput,
   InviteListPayload,
@@ -18,6 +20,7 @@ import type {
   MePayload,
   RegisterInput,
   SetupStatus,
+  TodayCheckin,
 } from './types'
 
 export const api = {
@@ -96,6 +99,57 @@ export const api = {
       ...(signal === undefined ? {} : { signal }),
     })
   },
+
+  /* ---------------------------------------------------------------------
+     打卡（ADR-012 §3）—— 全部需鉴权，响应只含本账号的数据
+     --------------------------------------------------------------------- */
+
+  /**
+   * POST /api/checkin/arrive —— 记录「今日到达」。
+   *
+   * **不带请求体**（§3：两个 POST 都不接受请求体）。发生时刻由服务端取 `now`、
+   * 归属日由 `shared/time` 折算——客户端指定时刻等于开放「补记任意历史打卡」，
+   * 01 FR1 没有要求这个能力，所以客户端这边连表达它的方式都不留。
+   */
+  arriveCheckin(): Promise<CheckinResult> {
+    return request<CheckinResult>({ method: 'POST', path: '/api/checkin/arrive', auth: true })
+  },
+
+  /**
+   * POST /api/checkin/leave —— 闭合最近一次到达（同样不带请求体）。
+   *
+   * 分流键是「**有无到达**」而不是「有无未闭合的到达」（ADR-012 §5，v1.2 的裁决）：
+   *   · 账户从无到达 → `409 conflict/not-arrived`（没有可配对的到达，也就无从知道记哪一天）；
+   *   · 最近那条到达已闭合 → **200，`created: false`，返回该行**——重复点击与网络重试
+   *     都走幂等而不是报错，界面据此如实说出第一次记录的时刻。
+   * 这两种情形在投影上本是同一个状态，只有换掉分流键才能让幂等与 409 同时成立。
+   */
+  leaveCheckin(): Promise<CheckinResult> {
+    return request<CheckinResult>({ method: 'POST', path: '/api/checkin/leave', auth: true })
+  },
+
+  /**
+   * GET /api/checkin/today —— 今日状态与连续天数。
+   *
+   * `streak` 由服务端按 `shared/checkin` 的口径算好（ADR-012 §6），
+   * 前端**不再自己算一遍**：同一个数字两个实现就是两个真相，
+   * 而 §5 删掉 `isRestDay` 字段正是为了这个理由。
+   */
+  getTodayCheckin(signal?: AbortSignal): Promise<TodayCheckin> {
+    return request<TodayCheckin>({
+      method: 'GET',
+      path: '/api/checkin/today',
+      auth: true,
+      ...(signal === undefined ? {} : { signal }),
+    })
+  },
+
+  /*
+   * ADR-012 §3 的第四条 `GET /api/checkin/days?from=&to=` 本阶段不在此实现：
+   * 它服务的用例（范围统计、热力图）分别属阶段 6 与后续阶段，而本阶段界面
+   * 只用得到 /today。契约里 `from`/`to` 均必填、返回升序这类约定是服务端
+   * 必须满足的，不是「客户端先备着」的理由——留到真正调用它的那一阶段再加。
+   */
 } as const
 
 export type Api = typeof api

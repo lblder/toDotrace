@@ -102,6 +102,38 @@ export function logout(stack: Stack, token: string): Promise<void> {
 }
 
 /* ---------------------------------------------------------------------------
+   打卡（ADR-012 §3）—— 两个 POST **不带请求体**
+   --------------------------------------------------------------------------- */
+
+export interface DayRow {
+  readonly dayKey: string
+  readonly arrivedAt: string
+  readonly leftAt: string | null
+}
+
+export interface CheckinResult {
+  readonly day: DayRow
+  readonly created: boolean
+}
+
+/** POST /api/checkin/arrive —— 不带 body（服务端取 now 并折算归属日） */
+export function arriveCheckin(stack: Stack, token: string): Promise<CheckinResult> {
+  return ok<CheckinResult>(stack, '/api/checkin/arrive', { method: 'POST', token })
+}
+
+/** POST /api/checkin/leave */
+export function leaveCheckin(stack: Stack, token: string): Promise<CheckinResult> {
+  return ok<CheckinResult>(stack, '/api/checkin/leave', { method: 'POST', token })
+}
+
+export function todayCheckin(
+  stack: Stack,
+  token: string,
+): Promise<{ day: DayRow | null; streak: number }> {
+  return ok(stack, '/api/checkin/today', { token })
+}
+
+/* ---------------------------------------------------------------------------
    预置账号：名字固定，失败时日志里能一眼看出是谁
    --------------------------------------------------------------------------- */
 

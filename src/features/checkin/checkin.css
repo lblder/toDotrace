@@ -1,0 +1,306 @@
+/* 打卡页：今日状态 + 印章 + 连续天数。
+   颜色、间距、圆角、时长全部走 tokens.css；此处不出现字面色值。 */
+
+/* --- 页头 -------------------------------------------------------------- */
+
+.ta-checkin__today {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-checkin__eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-primary-text);
+}
+
+.ta-checkin__heading {
+  font-size: var(--fs-2xl);
+  color: var(--c-ink);
+}
+
+.ta-checkin__subtitle {
+  max-width: var(--layout-measure);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-base);
+}
+
+/* 状态区与动作区之间留一口气，让印章落在纸上而不是挤在文字里 */
+.ta-checkin__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+/* --- 休息日 ------------------------------------------------------------ */
+/* 中性呈现：既不是错误（不用印泥红），也不是「缺了点什么」（不用空心占位），
+   只是一个还没落笔的今天。虚线的方格底纸比实线更接近「还没写」。 */
+
+.ta-checkin__rest {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--c-bg-sunken);
+}
+
+.ta-checkin__restMain {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-medium);
+  color: var(--c-ink);
+  letter-spacing: var(--ls-tight);
+}
+
+.ta-checkin__restNote {
+  max-width: var(--layout-measure);
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-snug);
+}
+
+/* --- 印章 -------------------------------------------------------------- */
+
+.ta-checkin__stampStage {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+/*
+ * 印章本体（03 §7：暗色印泥红 / 亮色另调，故颜色取自 --c-stamp）。
+ *
+ * 这里的样式就是**终态**——章已经压好，静止地摆在那儿。
+ * 入场动效只提供 from（见下面的 @keyframes），因此动效不跑时看到的就是它，
+ * 而不是一个「还没出现」的空位。
+ *
+ * 描边与内圈用 --c-stamp（印泥本体），文字用 --c-overdue-text
+ * （令牌的注释写明它是「文字专用」的那一档，两个主题下都 ≥4.9:1）。
+ */
+.ta-checkin__stamp {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: 9.5rem;
+  height: 9.5rem;
+  border: 2px solid var(--c-stamp);
+  border-radius: var(--radius-full);
+  /* 内圈：真章压出来的是两道边，中间隔着一线纸色 */
+  box-shadow:
+    inset 0 0 0 3px var(--c-panel),
+    inset 0 0 0 4px var(--c-stamp);
+  color: var(--c-overdue-text);
+  /* 手压的章不会是正的 */
+  transform: rotate(-6deg);
+}
+
+/* 印泥底色：只用令牌本身 + 透明度，不引入新的色值 */
+.ta-checkin__stamp::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  background: var(--c-stamp);
+  opacity: 0.08;
+}
+
+.ta-checkin__stampLabel,
+.ta-checkin__stampTime {
+  /* 压在上面那层印泥底色之上 */
+  position: relative;
+}
+
+.ta-checkin__stampLabel {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide);
+}
+
+.ta-checkin__stampTime {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+}
+
+/* 压下瞬间从章沿荡出去的一圈印泥 */
+.ta-checkin__stampRing {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--c-stamp);
+  border-radius: inherit;
+  opacity: 0;
+}
+
+/*
+ * 压下的一枚章 —— 全应用**唯一**的仪式性动效（03 §7）。
+ *
+ * 时长与缓动都取自为它预留的 --dur-stamp / --ease-stamp：
+ * 520ms 的过冲缓动，前段是「落下去」，末段是回弹落定。
+ * 其余地方的动效一律克制，不为任何别的交互复制这套参数。
+ */
+@keyframes ta-stamp-press {
+  from {
+    opacity: 0;
+    transform: rotate(-16deg) scale(1.65);
+  }
+}
+
+@keyframes ta-stamp-ink {
+  from {
+    opacity: 0.32;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.85);
+  }
+}
+
+.ta-checkin__stamp--press {
+  animation: ta-stamp-press var(--dur-stamp) var(--ease-stamp);
+}
+
+.ta-checkin__stamp--press .ta-checkin__stampRing {
+  animation: ta-stamp-ink var(--dur-stamp) var(--ease-out);
+}
+
+/*
+ * 尊重 prefers-reduced-motion（需求 §4）。
+ *
+ * 令牌层已经把 --dur-stamp 归零（tokens.css 的 :root 覆盖），这里再显式关掉一次：
+ * tokens.css 的注释写明「若日后有人把 --dur-* 挪进主题块，那条会失效」——
+ * 打卡印章是唯一会动的东西，它不该依赖那条注释被遵守。
+ * 关掉动画得到的正是上面那个静止终态，信息一点不少。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .ta-checkin__stamp--press,
+  .ta-checkin__stamp--press .ta-checkin__stampRing {
+    animation: none;
+  }
+}
+
+/* --- 事实清单 ---------------------------------------------------------- */
+
+.ta-checkin__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--c-border);
+}
+
+.ta-checkin__fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ta-checkin__fact dt {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-ink-faint);
+}
+
+.ta-checkin__fact dd {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+/* --- 动作区 ------------------------------------------------------------ */
+
+.ta-checkin__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.ta-checkin__error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* --- 连续天数 ---------------------------------------------------------- */
+
+.ta-checkin__streak {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ta-checkin__sectionHeading {
+  font-size: var(--fs-lg);
+  color: var(--c-ink);
+}
+
+/* 读数用衬线体（§7 的字体角色：衬线体读数） */
+.ta-checkin__streakValue {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--c-ink);
+}
+
+.ta-checkin__streakNumber {
+  font-size: var(--fs-3xl);
+  line-height: var(--lh-tight);
+  color: var(--c-primary-text);
+}
+
+.ta-checkin__streakUnit {
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+}
+
+.ta-checkin__streakNote {
+  max-width: var(--layout-measure);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-snug);
+}
+
+/* --- 辅助文字与脚注 ---------------------------------------------------- */
+
+.ta-checkin__hint {
+  max-width: var(--layout-measure);
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-snug);
+}
+
+.ta-checkin__footnote {
+  max-width: var(--layout-measure);
+  padding: 0 var(--space-1);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-faint);
+  line-height: var(--lh-snug);
+}
+
+/* --- 窄屏 -------------------------------------------------------------- */
+
+@media (max-width: 40rem) {
+  .ta-checkin__heading {
+    font-size: var(--fs-xl);
+  }
+
+  .ta-checkin__stamp {
+    width: 8rem;
+    height: 8rem;
+  }
+
+  .ta-checkin__facts {
+    gap: var(--space-4);
+  }
+}

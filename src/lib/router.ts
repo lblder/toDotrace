@@ -8,7 +8,14 @@
  * 不存在把用户可控字符串渲染出去的路径（也就没有 XSS / 文案注入面）。
  */
 
-export const ROUTE_NAMES = ['home', 'setup', 'login', 'register', 'invites'] as const
+export const ROUTE_NAMES = [
+  'home',
+  'checkin',
+  'setup',
+  'login',
+  'register',
+  'invites',
+] as const
 
 export type RouteName = (typeof ROUTE_NAMES)[number]
 
@@ -17,6 +24,7 @@ export const DEFAULT_ROUTE: RouteName = 'home'
 /** 路由 → 地址。navigate 只用这一张表，反向拼串不存在。 */
 const ROUTE_PATHS: Record<RouteName, string> = {
   home: '/',
+  checkin: '/checkin',
   setup: '/setup',
   login: '/login',
   register: '/register',
@@ -26,6 +34,7 @@ const ROUTE_PATHS: Record<RouteName, string> = {
 /** 页面标题也走白名单，避免把地址栏内容带进 document.title */
 const ROUTE_TITLES: Record<RouteName, string> = {
   home: '工作台',
+  checkin: '打卡',
   setup: '首次启动',
   login: '登录',
   register: '注册',
@@ -81,8 +90,8 @@ export function applyRouteTitle(name: RouteName): void {
   document.title = `${ROUTE_TITLES[name]} · ${APP_TITLE}`
 }
 
-/** 登录后才可达、且各有角色要求的白名单（不在此表的一律回工作台） */
-const AUTHED_ROUTES: readonly RouteName[] = ['home', 'invites']
+/** 登录后才可达的白名单（不在此表的一律回工作台）；角色限制在下面单独判 */
+const AUTHED_ROUTES: readonly RouteName[] = ['home', 'checkin', 'invites']
 
 /**
  * 路由守卫的纯函数形态：给定「是否存在 owner」「是否已登录」「是否 owner」，

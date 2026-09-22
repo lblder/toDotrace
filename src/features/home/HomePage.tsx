@@ -52,8 +52,11 @@ export function HomePage() {
           <li className="ta-home__listItem ta-home__listItem--done">
             鉴权关口：无令牌请求一律被拒，数据按账号隔离
           </li>
+          <li className="ta-home__listItem ta-home__listItem--done">
+            每日打卡：到达 / 离开、连续天数、休息日呈现
+          </li>
           <li className="ta-home__listItem">
-            打卡、计划、周期、分析 —— 阶段 2 起逐步接入
+            计划、周期、分析 —— 后续阶段逐步接入
           </li>
         </ul>
       </section>

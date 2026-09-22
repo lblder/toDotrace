@@ -9,6 +9,7 @@ import { notFound } from './lib/errors.js'
 import { createErrorHandler, notFoundHandler } from './middleware/error.js'
 import { securityHeaders } from './middleware/security.js'
 import { authRoutes } from './routes/auth.js'
+import { checkinRoutes } from './routes/checkin.js'
 import { inviteRoutes } from './routes/invites.js'
 import { memberRoutes } from './routes/members.js'
 import { setupRoutes } from './routes/setup.js'
@@ -96,6 +97,7 @@ export function createApp(options: AppOptions): Express {
   app.use('/api/auth', authRoutes(db, config, throttle, requireAuth))
   app.use('/api/invites', inviteRoutes(db, config, requireAuth, requireOwner))
   app.use('/api/members', memberRoutes(db, requireAuth, requireOwner))
+  app.use('/api/checkin', checkinRoutes(db, requireAuth))
   app.use('/api', notFoundHandler)
 
   if (config.isProduction) {

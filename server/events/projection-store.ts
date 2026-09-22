@@ -1,7 +1,7 @@
 import type { Db } from '../db/connection.js'
 import type { DayKey } from '@shared/time'
 import { assertInTransaction } from './transaction.js'
-import type { AccountSettings, NextAnchorMode, Projection, RecurrenceRule } from './types.js'
+import type { AccountSettings, NextAnchorMode, ProjectedDay, Projection, RecurrenceRule } from './types.js'
 
 /**
  * 投影表的读写——**本文件是全仓唯一写投影表的地方**（ADR-010「约束」）。
@@ -11,8 +11,11 @@ import type { AccountSettings, NextAnchorMode, Projection, RecurrenceRule } from
  * 除本文件以外的所有源码，出现 `INSERT/UPDATE/DELETE ... recurrence_templates`
  * 或 `... settings` 即失败。
  *
- * 两张投影表都在这里：`recurrence_templates`（ADR-011 §1）与 `settings`（ADR-010 §6）。
- * 后者的**唯一**来源是 `settings/updated` 事件——§7 明文把「违反约束直接 UPDATE」列为错误路径。
+ * 三张投影表都在这里：`recurrence_templates`（ADR-011 §1）、`settings`（ADR-010 §6）
+ * 与 `days`（ADR-012 §2）。后两者的**唯一**来源是 `settings/updated` 与
+ * `checkin/arrived` / `checkin/left` 事件——ADR-010 §7 明文把「违反约束直接 UPDATE」
+ * 列为错误路径，ADR-012 §4 又把这条纪律原样施加给打卡（「投影更新必须由事件层执行，
+ * 路由不得绕过它直接写投影表」）。
  *
  * 写入策略是**整账号替换**（DELETE 后按投影对象重新 INSERT）。理由：
  * `EventDefinition.apply(projection, event): void` 不返回「改了什么」，
@@ -26,6 +29,13 @@ interface SettingsRow {
   time_zone: string
   day_start_hour: number
   updated_at: string
+}
+
+interface DayRow {
+  account_id: string
+  day_key: string
+  arrived_at: string
+  left_at: string | null
 }
 
 interface TemplateRow {
@@ -60,7 +70,30 @@ export function readProjection(db: Db, accountId: string): Projection {
       updatedAt: row.updated_at,
     })),
     settings: readSettingsRow(db, accountId),
+    days: readDayRows(db, accountId),
   }
+}
+
+/**
+ * 读某账号的全部打卡日，**按 `day_key` 升序**（与 `canonicalizeProjection` 的规范化顺序一致）。
+ *
+ * 行序由 SQL 保证，但投影的顺序以 `canonicalizeProjection` 为准——
+ * 两条路径（读表 / 重放）必须给出同一个数组顺序，否则 ADR-010 §5 的
+ * 「增量 == 全量」无法逐字段断言。
+ */
+export function readDayRows(db: Db, accountId: string): ProjectedDay[] {
+  const rows = db
+    .prepare(
+      'SELECT account_id, day_key, arrived_at, left_at FROM days WHERE account_id = ? ORDER BY day_key',
+    )
+    .all(accountId) as DayRow[]
+
+  return rows.map((row) => ({
+    accountId: row.account_id,
+    dayKey: row.day_key as DayKey,
+    arrivedAt: row.arrived_at,
+    leftAt: row.left_at,
+  }))
 }
 
 /**
@@ -119,26 +152,52 @@ export function writeProjection(db: Db, accountId: string, projection: Projectio
   }
 
   const settings = projection.settings
-  if (settings === null) return // 已由 clearProjection 删净
-  if (settings.accountId !== accountId) {
-    throw new Error(
-      `投影中的设置属于账号 '${settings.accountId}'，不能写进账号 '${accountId}' 的投影表（跨账号写入）。`,
-    )
+  if (settings !== null) {
+    if (settings.accountId !== accountId) {
+      throw new Error(
+        `投影中的设置属于账号 '${settings.accountId}'，不能写进账号 '${accountId}' 的投影表（跨账号写入）。`,
+      )
+    }
+    db.prepare(
+      `INSERT INTO settings (account_id, time_zone, day_start_hour, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(account_id) DO UPDATE SET
+         time_zone = excluded.time_zone,
+         day_start_hour = excluded.day_start_hour,
+         updated_at = excluded.updated_at`,
+    ).run(accountId, settings.timeZone, settings.dayStartHour, settings.updatedAt)
   }
-  db.prepare(
-    `INSERT INTO settings (account_id, time_zone, day_start_hour, updated_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(account_id) DO UPDATE SET
-       time_zone = excluded.time_zone,
-       day_start_hour = excluded.day_start_hour,
-       updated_at = excluded.updated_at`,
-  ).run(accountId, settings.timeZone, settings.dayStartHour, settings.updatedAt)
+  // settings 为 null 时无需动作：已由 clearProjection 删净（整账号替换）。
+
+  const insertDay = db.prepare(
+    'INSERT INTO days (account_id, day_key, arrived_at, left_at) VALUES (?, ?, ?, ?)',
+  )
+  for (const day of projection.days) {
+    if (day.accountId !== accountId) {
+      throw new Error(
+        `投影中的打卡日 '${day.dayKey}' 属于账号 '${day.accountId}'，` +
+          `不能写进账号 '${accountId}' 的投影表（跨账号写入）。`,
+      )
+    }
+    if (typeof day.arrivedAt !== 'string' || day.arrivedAt.length === 0) {
+      // `arrived_at` 的 NOT NULL 只挡得住 NULL，挡不住空串——而空串在语义上
+      // 同样是「没有到达」，会当场推翻 ADR-012 §2 的「无行 ⇔ 无到达」
+      // （那正是 §2 说的「用结构保证不变式」要堵死的形态）。
+      // 这道断言与跨账号守卫同级：写在唯一的写入方，别处就没有绕过的机会。
+      throw new Error(
+        `打卡日 '${day.dayKey}'（账号 '${accountId}'）没有到达时刻，` +
+          '不能写进投影表：每一行必有到达是 ADR-012 §2 的结构约束。',
+      )
+    }
+    insertDay.run(accountId, day.dayKey, day.arrivedAt, day.leftAt)
+  }
 }
 
-/** 清空某账号的投影行（`rebuildProjection` 的第一步；模板与设置一并清）。 */
+/** 清空某账号的投影行（`rebuildProjection` 的第一步；模板、设置、打卡日一并清）。 */
 export function clearProjection(db: Db, accountId: string): void {
   db.prepare('DELETE FROM recurrence_templates WHERE account_id = ?').run(accountId)
   db.prepare('DELETE FROM settings WHERE account_id = ?').run(accountId)
+  db.prepare('DELETE FROM days WHERE account_id = ?').run(accountId)
 }
 
 /** 模板行数（测试与自检用；不参与重放） */
