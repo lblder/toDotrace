@@ -161,6 +161,63 @@ export function compareDayKey(a: DayKey, b: DayKey): -1 | 0 | 1 {
   return 0
 }
 
+// --- §8 月 / 年算术（v1.1 补）---------------------------------------------
+// 夹取与非夹取**两个都提供，不替调用方选**：夹取与否是业务口径，不是日期算术的性质。
+// 抛错版的存在理由与 §7 一致——静默夹取会污染数据；想要夹取的调用方必须显式写出来。
+
+function assertMonthCount(n: number): void {
+  if (!Number.isSafeInteger(n)) {
+    throw new RangeError(`月 / 年增量必须是整数，实得 ${String(n)}`)
+  }
+}
+
+/** 年月分量整体平移 n 个月（只动年月，不校验日号） */
+function shiftYearMonth(year: number, month: number, n: number): { year: number; month: number } {
+  const totalMonths = year * 12 + (month - 1) + n
+  const movedYear = Math.floor(totalMonths / 12)
+  return { year: movedYear, month: totalMonths - movedYear * 12 + 1 }
+}
+
+/** 该 dayKey 所在月份的天数（28/29/30/31） */
+export function daysInMonthOf(dk: DayKey): number {
+  const { year, month } = parseDayKey(dk)
+  return daysInMonth(year, month)
+}
+
+/**
+ * 加 N 个自然月。**目标日在该月不存在时抛 `RangeError`**（如 2026-01-31 加 1 月），
+ * 绝不静默夹取——要夹取请显式用 `addMonthsClamped`。
+ */
+export function addMonths(dk: DayKey, n: number): DayKey {
+  const { year, month, day } = parseDayKey(dk)
+  assertMonthCount(n)
+  const target = shiftYearMonth(year, month, n)
+  return makeDayKey(target.year, target.month, day)
+}
+
+/** 加 N 个自然年。2 月 29 日加到平年时抛 `RangeError`，同 `addMonths` */
+export function addYears(dk: DayKey, n: number): DayKey {
+  const { year, month, day } = parseDayKey(dk)
+  assertMonthCount(n)
+  return makeDayKey(year + n, month, day)
+}
+
+/** 按「夹取到该月最后一天」的惯例加 N 个月 —— 重复模块应当使用的那个 */
+export function addMonthsClamped(dk: DayKey, n: number): DayKey {
+  const { year, month, day } = parseDayKey(dk)
+  assertMonthCount(n)
+  const target = shiftYearMonth(year, month, n)
+  return makeDayKey(target.year, target.month, Math.min(day, daysInMonth(target.year, target.month)))
+}
+
+/** 同上，年粒度：2028-02-29 加 1 年 → 2029-02-28 */
+export function addYearsClamped(dk: DayKey, n: number): DayKey {
+  const { year, month, day } = parseDayKey(dk)
+  assertMonthCount(n)
+  const targetYear = year + n
+  return makeDayKey(targetYear, month, Math.min(day, daysInMonth(targetYear, month)))
+}
+
 /** 该周周一（周一返回自身）。自然周 = 周一至周日，全系统唯一口径 */
 export function weekStart(dk: DayKey): DayKey {
   const { year, month, day } = parseDayKey(dk)

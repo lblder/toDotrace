@@ -10,9 +10,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_DAY_START_HOUR,
   addDays,
+  addMonths,
+  addMonthsClamped,
+  addYears,
+  addYearsClamped,
   compareDayKey,
   dayEndInstant,
   dayStartInstant,
+  daysInMonthOf,
   diffDays,
   formatDayKey,
   isDayKey,
@@ -703,5 +708,204 @@ describe('非法输入', () => {
     expect(() => addDays('2026-2-30' as string, 1)).toThrow(RangeError)
     expect(() => diffDays('2026-02-30', '2026-03-01')).toThrow(RangeError)
     expect(() => compareDayKey('2026-09-21', 'oops')).toThrow(RangeError)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ADR-009 §8（v1.1 补）：月 / 年算术
+// 夹取与非夹取两个都提供、不替调用方选；抛错支与夹取支都要有证据。
+// ---------------------------------------------------------------------------
+
+describe('daysInMonthOf · 月长', () => {
+  it('各月天数', () => {
+    expect(daysInMonthOf('2026-01-15')).toBe(31)
+    expect(daysInMonthOf('2026-02-15')).toBe(28)
+    expect(daysInMonthOf('2026-04-15')).toBe(30)
+    expect(daysInMonthOf('2026-12-15')).toBe(31)
+  })
+
+  it('闰年 2 月 = 29', () => {
+    expect(daysInMonthOf('2024-02-15')).toBe(29)
+    expect(daysInMonthOf('2028-02-15')).toBe(29)
+    expect(daysInMonthOf('2027-02-15')).toBe(28)
+  })
+
+  it('世纪年写死：1900 年 2 月 = 28、2000 年 2 月 = 29（格里高利规则）', () => {
+    expect(daysInMonthOf('1900-02-15')).toBe(28)
+    expect(daysInMonthOf('2000-02-15')).toBe(29)
+    expect(daysInMonthOf('2100-02-15')).toBe(28)
+    expect(daysInMonthOf('2400-02-15')).toBe(29)
+  })
+
+  it('与 dayKey 所在月份一致（不因日号不同而变）', () => {
+    expect(daysInMonthOf('2026-02-01')).toBe(daysInMonthOf('2026-02-28'))
+  })
+
+  it('非法 DayKey 抛错', () => {
+    expect(() => daysInMonthOf('2026-02-30')).toThrow(RangeError)
+    expect(() => daysInMonthOf('2026-13-01')).toThrow(RangeError)
+    expect(() => daysInMonthOf('2026-2-1')).toThrow(RangeError)
+    expect(() => daysInMonthOf('oops')).toThrow(RangeError)
+  })
+})
+
+describe('§8 抛错支 · addMonths / addYears 不静默夹取', () => {
+  it('addMonths：目标日在该月不存在 → RangeError', () => {
+    expect(() => addMonths('2026-01-31', 1)).toThrow(RangeError) // 2026-02-31 不存在
+    expect(() => addMonths('2026-03-31', -1)).toThrow(RangeError) // 2026-02-31 不存在
+    expect(() => addMonths('2026-08-31', 1)).toThrow(RangeError) // 2026-09-31 不存在
+    expect(() => addMonths('2026-05-31', 1)).toThrow(RangeError) // 2026-06-31 不存在
+    expect(() => addMonths('2024-02-29', 12)).toThrow(RangeError) // 2025-02-29 不存在
+  })
+
+  it('addYears：2 月 29 日加到平年 → RangeError', () => {
+    expect(() => addYears('2028-02-29', 1)).toThrow(RangeError) // 2029-02-29 不存在
+    expect(() => addYears('2028-02-29', 2)).toThrow(RangeError)
+    expect(() => addYears('2028-02-29', 3)).toThrow(RangeError)
+  })
+
+  it('合法目标日照常返回（抛错支不是「一律拒绝」）', () => {
+    expect(addMonths('2026-01-15', 1)).toBe('2026-02-15')
+    expect(addMonths('2026-01-31', 2)).toBe('2026-03-31')
+    expect(addMonths('2026-01-31', 12)).toBe('2027-01-31')
+    expect(addMonths('2026-12-15', 1)).toBe('2027-01-15')
+    expect(addMonths('2026-01-15', -1)).toBe('2025-12-15')
+    expect(addMonths('2026-01-31', -1)).toBe('2025-12-31') // ADR 矩阵的负向用例
+    expect(addYears('2028-02-29', 4)).toBe('2032-02-29') // 4 年后仍是闰年
+    expect(addYears('2026-09-21', 1)).toBe('2027-09-21')
+    expect(addYears('2026-09-21', -1)).toBe('2025-09-21')
+  })
+})
+
+describe('§8 夹取支 · addMonthsClamped / addYearsClamped', () => {
+  it('月夹取到该月最后一天', () => {
+    expect(addMonthsClamped('2026-01-31', 1)).toBe('2026-02-28')
+    expect(addMonthsClamped('2026-03-31', -1)).toBe('2026-02-28')
+    expect(addMonthsClamped('2024-01-31', 1)).toBe('2024-02-29') // 闰年
+    expect(addMonthsClamped('2026-05-31', 1)).toBe('2026-06-30')
+    expect(addMonthsClamped('2026-03-30', -1)).toBe('2026-02-28')
+    expect(addMonthsClamped('2026-05-31', -3)).toBe('2026-02-28')
+    expect(addMonthsClamped('2026-12-31', 2)).toBe('2027-02-28')
+  })
+
+  it('不需要夹取时与 addMonths 结果相同', () => {
+    expect(addMonthsClamped('2026-01-31', 2)).toBe('2026-03-31')
+    expect(addMonthsClamped('2026-01-31', 12)).toBe('2027-01-31')
+    expect(addMonthsClamped('2026-01-31', -1)).toBe('2025-12-31')
+    expect(addMonthsClamped('2026-01-15', 1)).toBe('2026-02-15')
+  })
+
+  it('年夹取到该年该月最后一天', () => {
+    expect(addYearsClamped('2028-02-29', 1)).toBe('2029-02-28')
+    expect(addYearsClamped('2028-02-29', 4)).toBe('2032-02-29')
+    expect(addYearsClamped('2028-02-29', 2)).toBe('2030-02-28')
+    expect(addYearsClamped('2026-09-21', 1)).toBe('2027-09-21')
+    expect(addYearsClamped('2026-02-28', 1)).toBe('2027-02-28')
+  })
+
+  it('世纪年夹取：2000-02-29 加 100 年 → 2100-02-28（2100 非闰），加 400 年 → 2400-02-29', () => {
+    expect(addYearsClamped('2000-02-29', 100)).toBe('2100-02-28')
+    expect(addYearsClamped('2000-02-29', 400)).toBe('2400-02-29')
+  })
+
+  it('夹取不可逆：先加后减会停在夹取点（重复模块需知）', () => {
+    expect(addMonthsClamped(addMonthsClamped('2026-01-31', 1), -1)).toBe('2026-01-28')
+    expect(addYearsClamped(addYearsClamped('2028-02-29', 1), -1)).toBe('2028-02-28')
+  })
+
+  it('结果恒为合法 DayKey，且日号 = min(原日号, 目标月月长)', () => {
+    const starts = ['2024-01-31', '2026-01-31', '2026-03-31', '2026-05-31', '2028-02-29', '2027-02-28', '2026-12-31']
+    for (const dk of starts) {
+      for (let n = -25; n <= 25; n += 1) {
+        const result = addMonthsClamped(dk, n)
+        expect(isDayKey(result)).toBe(true)
+        const origin = parseDayKey(dk)
+        const moved = parseDayKey(result)
+        const expectedMonth = (((origin.month - 1 + n) % 12) + 12) % 12 + 1
+        const expectedYear = origin.year + Math.floor((origin.month - 1 + n) / 12)
+        expect(moved.year).toBe(expectedYear)
+        expect(moved.month).toBe(expectedMonth)
+        expect(moved.day).toBe(Math.min(origin.day, daysInMonthOf(result)))
+      }
+    }
+  })
+})
+
+describe('§8 零与负', () => {
+  it('n = 0 时四个函数均返回原值（含 addYears*）', () => {
+    for (const dk of ['2026-09-21', '2026-01-31', '2028-02-29', '2026-12-31', '0001-01-01']) {
+      expect(addMonths(dk, 0)).toBe(dk)
+      expect(addYears(dk, 0)).toBe(dk)
+      expect(addMonthsClamped(dk, 0)).toBe(dk)
+      expect(addYearsClamped(dk, 0)).toBe(dk)
+    }
+  })
+
+  it('负向跨年', () => {
+    expect(addMonths('2026-01-31', -1)).toBe('2025-12-31')
+    expect(addMonths('2026-01-01', -1)).toBe('2025-12-01')
+    expect(addMonthsClamped('2026-01-31', -1)).toBe('2025-12-31')
+    expect(addYears('2026-01-01', -1)).toBe('2025-01-01')
+    expect(addYearsClamped('2026-03-01', -1)).toBe('2025-03-01')
+  })
+
+  it('±12 个月 ≡ ±1 年（两族函数在各自口径下一致）', () => {
+    const dks = ['2026-09-21', '2026-01-31', '2028-02-29', '2026-12-31', '2026-02-28']
+    for (const dk of dks) {
+      expect(addMonthsClamped(dk, 12)).toBe(addYearsClamped(dk, 1))
+      expect(addMonthsClamped(dk, -12)).toBe(addYearsClamped(dk, -1))
+      // 抛错支：两边要么都得同一个值，要么都抛（用结果比对，不吞异常）
+      const monthOutcome = outcomeOf(() => addMonths(dk, 12))
+      const yearOutcome = outcomeOf(() => addYears(dk, 1))
+      expect(monthOutcome).toBe(yearOutcome)
+    }
+  })
+})
+
+/** 把「返回值或抛错」压成可比较的字符串，用于断言两族函数口径一致 */
+function outcomeOf(action: () => string): string {
+  try {
+    return `ok:${action()}`
+  } catch (error) {
+    return `throw:${(error as Error).constructor.name}`
+  }
+}
+
+describe('§8 范围与参数校验', () => {
+  it('越过 0001–9999 年范围抛错', () => {
+    expect(() => addMonths('9999-12-15', 1)).toThrow(RangeError)
+    expect(() => addYears('9999-01-01', 1)).toThrow(RangeError)
+    expect(() => addMonths('0001-01-15', -1)).toThrow(RangeError)
+    expect(() => addYears('0001-01-01', -1)).toThrow(RangeError)
+    expect(() => addMonthsClamped('9999-12-15', 1)).toThrow(RangeError)
+    expect(() => addYearsClamped('9999-06-15', 1)).toThrow(RangeError)
+  })
+
+  it('n 必须为整数', () => {
+    for (const n of [1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => addMonths('2026-01-15', n)).toThrow(RangeError)
+      expect(() => addYears('2026-01-15', n)).toThrow(RangeError)
+      expect(() => addMonthsClamped('2026-01-15', n)).toThrow(RangeError)
+      expect(() => addYearsClamped('2026-01-15', n)).toThrow(RangeError)
+    }
+  })
+
+  it('入口一律校验 DayKey', () => {
+    for (const bad of ['2026-02-30', '2027-02-29', '2026-13-01', '2026-1-1', 'oops']) {
+      expect(() => addMonths(bad, 1)).toThrow(RangeError)
+      expect(() => addYears(bad, 1)).toThrow(RangeError)
+      expect(() => addMonthsClamped(bad, 1)).toThrow(RangeError)
+      expect(() => addYearsClamped(bad, 1)).toThrow(RangeError)
+      expect(() => daysInMonthOf(bad)).toThrow(RangeError)
+    }
+  })
+
+  it('纯函数恒等：固定入参反复调用结果恒等', () => {
+    const first = addMonthsClamped('2026-01-31', 14)
+    for (let i = 0; i < 5; i += 1) {
+      expect(addMonthsClamped('2026-01-31', 14)).toBe(first)
+      expect(addMonths('2026-01-15', 14)).toBe(addMonths('2026-01-15', 14))
+      expect(addYearsClamped('2028-02-29', 1)).toBe('2029-02-28')
+    }
   })
 })

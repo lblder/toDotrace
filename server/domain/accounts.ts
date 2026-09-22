@@ -1,5 +1,7 @@
 import type { Config } from '../config.js'
 import type { Db } from '../db/index.js'
+import { appendEvents } from '../events/append.js'
+import { initialSettingsDraft } from '../events/settings.js'
 import { conflict, inviteInvalid, invalidCredentials, locked } from '../lib/errors.js'
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../lib/password.js'
 import { isExpired, isoAfterMs, nowIso } from '../lib/time.js'
@@ -87,6 +89,9 @@ export async function createOwner(
       passwordHash,
       createdAt,
     })
+    // 账号的初始化设置事件（ADR-010 §6/§7）：`settings` 表的唯一来源。
+    // 与用户创建**同一个事务**——否则会留下一个没有任何设置事实的账号。
+    appendEvents(db, id, [initialSettingsDraft(createdAt)])
     const created = findUserById(db, id)
     if (!created) throw new Error('创建所有者后读取失败')
     return created
@@ -185,6 +190,8 @@ export async function registerWithInvite(
     if (!markInviteUsed(db, fresh.id, id, createdAt)) {
       throw conflict('conflict/invite-used', '邀请码已被使用')
     }
+    // 同 createOwner：设置事件与用户创建同事务（ADR-010 §6/§7）。
+    appendEvents(db, id, [initialSettingsDraft(createdAt)])
     const created = findUserById(db, id)
     if (!created) throw new Error('创建成员后读取失败')
     return created

@@ -56,8 +56,10 @@ describe('连接纪律', () => {
   })
 
   it('模式版本用 PRAGMA user_version 记录', () => {
+    // 有意义的断言是「库里的实际版本 == 代码常量」；原先另有一条 `SCHEMA_VERSION === 1`
+    // 的硬编码断言，它每升一次版本就要改一次、却检查不出任何真实问题，
+    // 且与上一行重复（阶段 2 升 v2 时它挡下了全仓验证），故删除。
     expect(getSchemaVersion(db)).toBe(SCHEMA_VERSION)
-    expect(SCHEMA_VERSION).toBe(1)
   })
 
   it('库版本高于程序支持版本时拒绝启动', () => {
