@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -17,6 +18,8 @@ export interface Stack {
   /** 临时库路径，只用于断言「没碰 data/app.db」 */
   readonly dbPath: string
   readonly apiPort: number
+  /** 到目前为止捕获的服务端 stdout/stderr（失败时由 serverLogOnFailure 挂出去） */
+  serverLog(): string
   stop(): Promise<void>
 }
 
@@ -60,8 +63,13 @@ async function waitReady(child: ChildProcess, baseUrl: string, logs: string[]): 
   }
 }
 
-async function stopStack(child: ChildProcess, dir: string): Promise<void> {
-  if (child.exitCode === null) {
+async function stopStack(child: ChildProcess, dir: string, state: StackState): Promise<void> {
+  // 已经退出就不要再等了。**被信号杀死时 `exitCode` 仍是 null**，只有 `signalCode` 有值——
+  // 只看 exitCode 会把「早就没了」当成「还在跑」，而 exit 事件不会来第二次，
+  // 于是这里的 await 永不返回：teardown 挂死，连带临时目录也留了下来。
+  if (child.exitCode === null && child.signalCode === null) {
+    // 先立旗再杀：否则下面的 exit 钩子会把一次正常收工报成「意外退出」
+    state.stopping = true
     const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
     child.kill('SIGTERM')
     const force = setTimeout(() => child.kill('SIGKILL'), 5_000)
@@ -69,6 +77,28 @@ async function stopStack(child: ChildProcess, dir: string): Promise<void> {
     clearTimeout(force)
   }
   rmSync(dir, { recursive: true, force: true })
+}
+
+/** 一套栈的运行时状态：日志缓冲区 + 「是不是我们主动停的」 */
+interface StackState {
+  readonly logs: string[]
+  stopping: boolean
+}
+
+/**
+ * 产物指纹：`dist/index.html` 的 sha256 前 12 位。
+ *
+ * 全部测试共用的可写资源只有 `dist/` 一个——并发的另一次 `vite build`
+ * 会在脚下把产物换掉，而这类事情的现场特征是「谁都说不清当时跑的是哪份产物」。
+ * 指纹随日志一起留下（见 serverLogOnFailure），于是「两次运行拿到的是不是同一份产物」
+ * 从推测变成可对照的事实。
+ */
+function distFingerprint(): string {
+  try {
+    return createHash('sha256').update(readFileSync(path.join(DIST, 'index.html'))).digest('hex').slice(0, 12)
+  } catch {
+    return '（读不到 dist/index.html）'
+  }
 }
 
 /**
@@ -106,19 +136,98 @@ export async function startStack(): Promise<Stack> {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
-    const logs: string[] = []
+    const state: StackState = { logs: [], stopping: false }
+    const logs = state.logs
+    logs.push(`[harness] 前端产物 dist/index.html sha256=${distFingerprint()}\n`)
     child.stdout?.on('data', (chunk) => logs.push(String(chunk)))
     child.stderr?.on('data', (chunk) => logs.push(String(chunk)))
 
+    /*
+     * 进程中途死掉也要在日志里留一条。
+     * 没有这一条时，「服务端崩了」与「服务端什么都没说」在日志里长得一模一样——
+     * 而连接被拒的报错出现在浏览器那一侧，看的人只会以为是前端的问题。
+     */
+    child.once('exit', (code, signal) => {
+      logs.push(
+        state.stopping
+          ? `[harness] 服务端已停止（${signal ?? `code=${code}`}）\n`
+          : `[harness] ⚠️ 服务端进程**意外退出**：code=${code} signal=${signal}\n`,
+      )
+    })
+
     try {
       await waitReady(child, baseUrl, logs)
-      return { baseUrl, dbPath, apiPort, stop: () => stopStack(child, dir) }
+      return {
+        baseUrl,
+        dbPath,
+        apiPort,
+        serverLog: () => logs.join(''),
+        stop: () => stopStack(child, dir, state),
+      }
     } catch (error) {
       lastFailure = error
-      await stopStack(child, dir)
+      await stopStack(child, dir, state)
     }
   }
   throw lastFailure instanceof Error ? lastFailure : new Error(String(lastFailure))
+}
+
+/**
+ * 用例失败时，把已捕获的服务端日志**吐出来**（终端 + test-results/ 附件）。
+ *
+ * 起因是一次真实的失败现场：界面里是服务端的错误信封 `{"error":{"code":"server/internal-error"}}`，
+ * 而服务端那一侧什么都没留下——「那个 500 是哪个请求、它当时在干什么」于是无从查起。
+ * 日志其实一直在收（startStack 把 stdout/stderr 收进 logs），只是从前**只在启动失败时**才抛出。
+ * 服务端每个请求都会打一行 `方法 路径 状态 耗时`（server/app.ts 的请求日志），
+ * 所以只要把这段日志拿在手上，500 就不再是黑盒。
+ *
+ * 两处都写：终端里直接看得见（list reporter 会转发用例的 stdout），
+ * 同时挂成该用例的附件落到 test-results/ 下，与截图、trace 放在一起。
+ *
+ * 一个文件里多条用例失败时，只有第一条会把日志完整打一遍（附件则每条都有）——
+ * 同一份日志刷十遍会把真正要看的那一行淹掉。
+ *
+ * **必须在文件或 describe 的作用域里调用**（与 useStack 同样的限制）：它注册的是 afterEach 钩子。
+ */
+export function serverLogOnFailure(getStacks: () => readonly (Stack | undefined)[]): void {
+  let printed = false
+
+  test.afterEach(async ({}, testInfo) => {
+    // skipped 不算：serial 里被前面拖累而跳过的用例没有自己的失败现场
+    if (testInfo.status !== 'failed' && testInfo.status !== 'timedOut') return
+
+    const stacks = getStacks().filter((candidate): candidate is Stack => candidate !== undefined)
+    if (stacks.length === 0) return
+
+    const many = stacks.length > 1
+    const reports = stacks.map((stack, index) => ({
+      name: many ? `server-${index + 1}.log` : 'server.log',
+      log: stack.serverLog(),
+    }))
+
+    // 落盘一份到该用例的产物目录（test-results/<用例>/），与截图、trace 摆在一起。
+    // 附件只带 body 时 Playwright 不会把它写成文件（list reporter 是把它打在终端上的），
+    // 所以这一步单独做——不然「写进 test-results/」只是句空话。
+    for (const report of reports) writeFileSync(testInfo.outputPath(report.name), report.log)
+
+    await Promise.all(
+      reports.map((report) =>
+        testInfo.attach(report.name, { body: report.log, contentType: 'text/plain' }),
+      ),
+    )
+
+    if (printed) {
+      console.log('[harness] 服务端日志同上（已挂到 test-results/ 的附件里）')
+      return
+    }
+    printed = true
+
+    const rule = '─'.repeat(72)
+    const blocks = stacks.map(
+      (stack, index) => `${many ? `── 栈 #${index + 1} ${stack.baseUrl} ──\n` : ''}${stack.serverLog()}`,
+    )
+    console.log(`\n${rule}\n[harness] 用例失败：${testInfo.title}\n[harness] 服务端日志\n${rule}\n${blocks.join('\n')}${rule}\n`)
+  })
 }
 
 /**
@@ -136,6 +245,9 @@ export function useStack(): () => Stack {
   test.beforeAll(async () => {
     stack = await startStack()
   })
+
+  // 失败时带上服务端日志（见上）
+  serverLogOnFailure(() => [stack])
 
   test.afterAll(async () => {
     const running = stack

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../lib/password.js'
 import { generateSecret, hashSecret, parseBearerToken } from '../lib/token.js'
 import { LoginThrottle } from '../domain/login-throttle.js'
-import { isExpired, toIso } from '../lib/time.js'
+import { isExpired, toIso, toIsoUtc } from '../lib/time.js'
 import { uuidv7 } from '../lib/uuid.js'
 
 describe('密码哈希（scrypt，ADR-008 §4）', () => {
@@ -118,6 +118,20 @@ describe('时间与标识', () => {
     expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/)
     // 本机时区偏移下往返解析一致（不假设具体时区）
     expect(Date.parse(iso)).toBe(Date.parse('2026-09-21T14:03:00+08:00'))
+  })
+
+  it('UTC 口径：账号域时间列一律渲染成 +00:00，且是同瞬间的另一串（ADR-010 §1）', () => {
+    // 断言**逐字符**的期望值（而不是「以 +00:00 结尾」），把口径钉死：
+    // 同一瞬间在 +08:00 下是 14:03，UTC 下是 06:03——渲染错时区就会在这里现形，
+    // 且与运行机器本身的时区无关（本机 TZ=Asia/Shanghai 也照样过）。
+    const instant = new Date('2026-09-21T14:03:00+08:00')
+    expect(toIsoUtc(instant)).toBe('2026-09-21T06:03:00+00:00')
+    // 绝对时刻不变：偏移只是渲染
+    expect(Date.parse(toIsoUtc(instant))).toBe(Date.parse('2026-09-21T14:03:00+08:00'))
+    // 用 `Z` 也不合规：ADR-008 §1 的口径是 ±HH:MM（与 ADR 正文示例同形）
+    expect(toIsoUtc(instant)).not.toContain('Z')
+    // 事件列走的是另一套（该行 timezone 列）——两个口径不是同一个函数
+    if (instant.getTimezoneOffset() !== 0) expect(toIso(instant)).not.toBe(toIsoUtc(instant))
   })
 
   it('到期判断：无法解析视为已到期', () => {

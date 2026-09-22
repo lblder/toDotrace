@@ -4,7 +4,7 @@ import { appendEvents } from '../events/append.js'
 import { initialSettingsDraft } from '../events/settings.js'
 import { conflict, inviteInvalid, invalidCredentials, locked } from '../lib/errors.js'
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../lib/password.js'
-import { isExpired, isoAfterMs, nowIso } from '../lib/time.js'
+import { isExpired, isoAfterMsUtc, nowIsoUtc, toIsoUtc } from '../lib/time.js'
 import { generateSecret, hashSecret } from '../lib/token.js'
 import { uuidv7 } from '../lib/uuid.js'
 import type { LoginThrottle } from './login-throttle.js'
@@ -32,11 +32,16 @@ export interface AuthSuccess {
   token: string
 }
 
-/** 令牌明文只在此处产生、只在签发响应里出现一次；库中只存 SHA-256（ADR-008 §4）。 */
+/**
+ * 令牌明文只在此处产生、只在签发响应里出现一次；库中只存 SHA-256（ADR-008 §4）。
+ *
+ * 时间列一律 **UTC 口径**（ADR-010 §1 收窄后的账号域口径）：`sessions` 只记
+ * 「什么时候建的、什么时候到期」，都是绝对时刻，没有归属日可言。
+ */
 function issueSession(db: Db, config: Config, user: UserRow): { token: string; expiresAt: string } {
   const token = generateSecret()
-  const now = nowIso()
-  const expiresAt = isoAfterMs(config.sessionTtlMs)
+  const now = nowIsoUtc()
+  const expiresAt = isoAfterMsUtc(config.sessionTtlMs)
   insertSession(db, {
     id: uuidv7(),
     userId: user.id,
@@ -75,7 +80,14 @@ export async function createOwner(
   // 慢哈希放在事务外：不把 ~50ms 的 CPU 时间按在写锁上。
   const passwordHash = await hashPassword(input.password)
   const id = uuidv7()
-  const createdAt = nowIso()
+  // 一个瞬间，两种口径——**它们不能共用一个串**（ADR-010 §1）：
+  //   - `users.created_at` 是账号域列 → UTC（`toIsoUtc`）；
+  //   - 同一事务里那条 `settings/updated` 事件行的 `occurred_at` → 账号时区，且必须
+  //     与该行自己的 `timezone` 列同源（由 `initialSettingsDraft` 内部渲染，这里只传时刻）。
+  // 曾经这里是同一个 `nowIso()` 串喂两处：进程时区一变，事件行的 `occurred_at` 偏移
+  // 就与它的 `timezone` 列对不上，四列不再自洽。
+  const now = new Date()
+  const createdAt = toIsoUtc(now)
 
   const create = db.transaction((): UserRow => {
     if (ownerExists(db)) {
@@ -91,7 +103,7 @@ export async function createOwner(
     })
     // 账号的初始化设置事件（ADR-010 §6/§7）：`settings` 表的唯一来源。
     // 与用户创建**同一个事务**——否则会留下一个没有任何设置事实的账号。
-    appendEvents(db, id, [initialSettingsDraft(createdAt)])
+    appendEvents(db, id, [initialSettingsDraft(now)])
     const created = findUserById(db, id)
     if (!created) throw new Error('创建所有者后读取失败')
     return created
@@ -141,7 +153,8 @@ export async function login(
 
   throttle.recordSuccess(input.username)
 
-  touchLastSeen(db, user.id, nowIso())
+  // last_seen_at 是账号域列 → UTC 口径（ADR-010 §1）。
+  touchLastSeen(db, user.id, nowIsoUtc())
 
   const { token } = issueSession(db, config, user)
   return { user: toPublicUser(user), token }
@@ -166,7 +179,10 @@ export async function registerWithInvite(
 
   const passwordHash = await hashPassword(input.password)
   const id = uuidv7()
-  const createdAt = nowIso()
+  // 同 createOwner：一个瞬间两种口径——`users.created_at` 与 `invites.used_at`（账号域）走 UTC，
+  // 同事务里的 `settings/updated` 事件行由 `initialSettingsDraft` 按账号时区渲染。
+  const now = new Date()
+  const createdAt = toIsoUtc(now)
 
   const create = db.transaction((): UserRow => {
     // 事务内复核：并发使用时只有一个能占住邀请码。
@@ -191,7 +207,7 @@ export async function registerWithInvite(
       throw conflict('conflict/invite-used', '邀请码已被使用')
     }
     // 同 createOwner：设置事件与用户创建同事务（ADR-010 §6/§7）。
-    appendEvents(db, id, [initialSettingsDraft(createdAt)])
+    appendEvents(db, id, [initialSettingsDraft(now)])
     const created = findUserById(db, id)
     if (!created) throw new Error('创建成员后读取失败')
     return created
@@ -223,12 +239,19 @@ export interface IssuedInvite {
   expiresAt: string
 }
 
-/** 签发邀请码：明文 code 只在本次响应出现一次，库中只存 SHA-256（ADR-008 §4）。 */
+/**
+ * 签发邀请码：明文 code 只在本次响应出现一次，库中只存 SHA-256（ADR-008 §4）。
+ *
+ * 时间列一律 **UTC 口径**（ADR-010 §1 账号域口径）：`invites` 的 `created_at` / `expires_at`
+ * 只参与绝对时刻比较（`isExpired` 走 `Date.parse`），偏移只是渲染——渲染成 UTC。
+ */
 export function issueInvite(db: Db, config: Config, ownerId: string, expiresInDays?: number): IssuedInvite {
   const code = generateSecret()
   const id = uuidv7()
-  const createdAt = nowIso()
-  const expiresAt = isoAfterMs(expiresInDays === undefined ? config.inviteTtlMs : expiresInDays * 24 * 60 * 60 * 1000)
+  const createdAt = nowIsoUtc()
+  const expiresAt = isoAfterMsUtc(
+    expiresInDays === undefined ? config.inviteTtlMs : expiresInDays * 24 * 60 * 60 * 1000,
+  )
   insertInvite(db, {
     id,
     codeHash: hashSecret(code),

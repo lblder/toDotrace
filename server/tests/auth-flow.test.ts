@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { toDayKey } from '@shared/time'
+import { toIsoInZone } from '../lib/time.js'
 import { CONTENT_SECURITY_POLICY } from '../middleware/security.js'
 import {
   api,
@@ -633,5 +635,72 @@ describe('令牌存储形态', () => {
     }
     expect(JSON.stringify(rows)).not.toContain('alice-password-1')
     expect(JSON.stringify(rows)).not.toContain('member-password-1')
+  })
+})
+
+/**
+ * ADR-010 §1 收窄后的两类口径，在**同一个事务**里并存：
+ * 账号域列（`users` / `sessions` / `invites`）走 UTC；事件行的 `occurred_at` 走
+ * 该行自己的 `timezone` 列（此处即创建账号时的服务端本地时区）。
+ *
+ * 这条测试的靶子是「一个瞬间被当成一个串用」——`createOwner` 曾经把同一个 `nowIso()`
+ * 串同时喂给 `users.created_at` 与初始化事件（阶段 3 独立验证证伪的那处）。
+ */
+describe('时间列口径：账号域 UTC，事件行用该行 timezone（ADR-010 §1）', () => {
+  it('建号：账号域列 +00:00；同事务的设置事件行四列自洽、可复算', async () => {
+    const fresh = await startTestServer()
+    try {
+      const created = await api(fresh, 'POST', '/api/setup/owner', {
+        body: { username: 'tzoe', password: 'tzoe-password-1', displayName: '时区' },
+      })
+      expect(created.status).toBe(200)
+      const userId = created.body.user.id as string
+
+      // 账号域：一律 +00:00（不是进程时区的偏移）
+      const user = fresh.db.prepare('SELECT created_at FROM users WHERE id = ?').get(userId) as {
+        created_at: string
+      }
+      expect(user.created_at).toMatch(/\+00:00$/)
+      const sessions = fresh.db
+        .prepare('SELECT created_at, expires_at FROM sessions WHERE user_id = ?')
+        .all(userId) as Array<{ created_at: string; expires_at: string }>
+      expect(sessions.length).toBeGreaterThan(0)
+      for (const row of sessions) {
+        expect(row.created_at).toMatch(/\+00:00$/)
+        expect(row.expires_at).toMatch(/\+00:00$/)
+      }
+
+      // 事件行：另一种口径。判据是**它自己的**列入参能把它算回来（ADR-010 §1）
+      const event = fresh.db
+        .prepare(
+          `SELECT occurred_at, timezone, day_key, day_start_hour
+             FROM events WHERE account_id = ? AND type = 'settings/updated'`,
+        )
+        .get(userId) as {
+        occurred_at: string
+        timezone: string
+        day_key: string
+        day_start_hour: number
+      }
+      expect(event).toBeDefined()
+      expect(toIsoInZone(new Date(event.occurred_at), event.timezone)).toBe(event.occurred_at)
+      expect(
+        toDayKey(new Date(event.occurred_at), {
+          timeZone: event.timezone,
+          dayStartHour: event.day_start_hour,
+        }),
+      ).toBe(event.day_key)
+
+      // 两行渲染的是**同一个瞬间**（`now` 只取一次），却是两个串。
+      expect(Date.parse(event.occurred_at)).toBe(Date.parse(user.created_at))
+      // 进程时区不是 UTC 时（本机 Asia/Shanghai 就是），两者必须真的不同——
+      // 相同就说明又退回「一个瞬间一个串」了。UTC 机器上此断言无意义，故按条件跳过。
+      if (new Date().getTimezoneOffset() !== 0) {
+        expect(event.occurred_at).not.toBe(user.created_at)
+        expect(event.occurred_at).not.toMatch(/\+00:00$/)
+      }
+    } finally {
+      await fresh.close()
+    }
   })
 })

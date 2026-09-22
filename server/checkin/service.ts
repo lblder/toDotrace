@@ -8,7 +8,7 @@ import { loadAccountSettings, timeContextOf } from '../events/settings.js'
 import { assertInTransaction } from '../events/transaction.js'
 import type { ProjectedDay } from '../events/types.js'
 import { notArrived } from '../lib/errors.js'
-import { toIso } from '../lib/time.js'
+import { toIsoInZone } from '../lib/time.js'
 
 /**
  * 打卡的域逻辑（ADR-012 §3 / §5）。
@@ -73,7 +73,9 @@ export function arrive(db: Db, accountId: string, now: Date): CheckinResult {
     return { day: toDayRow(existing), created: false }
   }
 
-  const occurredAt = toIso(now)
+  // 偏移取自账号时区（ADR-010 §1）：与将要写进同一行的 timezone / day_key /
+  // day_start_hour 同源，四列自洽、可复算；进程时区不进入任何持久化数据。
+  const occurredAt = toIsoInZone(now, settings.timeZone)
   appendEvents(db, accountId, [
     {
       type: CHECKIN_ARRIVED_TYPE,
@@ -138,7 +140,9 @@ export function leave(db: Db, accountId: string, now: Date): CheckinResult {
   appendEvents(db, accountId, [
     {
       type: CHECKIN_LEFT_TYPE,
-      occurredAt: toIso(now),
+      // 同样按账号时区渲染偏移（ADR-010 §1）：离开事件的 day_key 是继承来的，
+      // 但 occurred_at / timezone 两列仍必须同源。
+      occurredAt: toIsoInZone(now, settings.timeZone),
       payload: {},
       // §5：归属日 = **所配对的那次到达的**归属日，不是本事件 occurred_at 的折算结果。
       dayKey: latest.dayKey,

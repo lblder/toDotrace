@@ -1,4 +1,5 @@
 import type { Db } from '../db/connection.js'
+import { toIsoInZone } from '../lib/time.js'
 import { DEFAULT_DAY_START_HOUR, type TimeContext } from '@shared/time'
 import { SETTINGS_UPDATED_TYPE, type SettingsUpdatedPayload } from './definitions/settings.js'
 import { readSettingsRow } from './projection-store.js'
@@ -77,13 +78,23 @@ export function loadAccountSettings(db: Db, accountId: string): AccountSettings 
  *
  * 取值即 ADR-010 §6 的「首次创建账号时取服务端本地时区」+ `DEFAULT_DAY_START_HOUR`。
  * 放在这里而不是让两个创建路径各自拼载荷：**这条事件的形状是一处契约**，
- * 各写一遍就是两个真相（何况其中一处迟早会忘记 `occurredAt` 要带时区偏移）。
+ * 各写一遍就是两个真相。
+ *
+ * 入参是**时刻**（`Date`）而不是已经渲染好的串，理由同上——而且这条路上有过前科：
+ * 创建账号的同一个事务里，账号域列（`users.created_at`）走 UTC 口径，而这条**事件行**的
+ * `occurred_at` 必须走账号时区口径（ADR-010 §1 的两类判据）。调用方若自己渲染，
+ * 顺手把 UTC 那串拿来用是最自然的事，于是事件行的 `occurred_at` 偏移与它自己的
+ * `timezone` 列当场对不上——正是 §1 修掉的那个 bug。
+ * 把「取时区」与「渲染偏移」关进同一个函数，调用方就没有写错的位置。
  */
-export function initialSettingsDraft(occurredAt: string): EventDraft<SettingsUpdatedPayload> {
+export function initialSettingsDraft(at: Date): EventDraft<SettingsUpdatedPayload> {
+  // 一次取值供两处使用：载荷里的 timeZone 与实际渲染 occurred_at 偏移的那个时区
+  // **必须同源**（ADR-010 §1），否则四列自洽就靠调用方的记性了。
+  const timeZone = serverTimeZone()
   return {
     type: SETTINGS_UPDATED_TYPE,
-    occurredAt,
-    payload: { timeZone: serverTimeZone(), dayStartHour: DEFAULT_DAY_START_HOUR },
+    occurredAt: toIsoInZone(at, timeZone),
+    payload: { timeZone, dayStartHour: DEFAULT_DAY_START_HOUR },
   }
 }
 

@@ -2,7 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express'
 import type { Config } from '../config.js'
 import type { Db } from '../db/index.js'
 import { forbidden, internalError, invalidToken, missingToken } from '../lib/errors.js'
-import { isExpired, isoAfterMs, nowIso } from '../lib/time.js'
+import { isExpired, isoAfterMsUtc, nowIsoUtc } from '../lib/time.js'
 import { hashSecret, parseBearerToken } from '../lib/token.js'
 import { deleteSessionById, findSessionWithUser, renewSession } from '../repo/sessions.js'
 import { touchLastSeen } from '../repo/users.js'
@@ -58,8 +58,10 @@ export function createRequireAuth(
       return
     }
 
-    const now = nowIso()
-    const expiresAt = isoAfterMs(config.sessionTtlMs)
+    // 续期写的是 `sessions` / `users` 的时间列——**账号域**，一律 UTC 口径（ADR-010 §1）：
+    // 这些列只表达绝对时刻，没有归属日。事件行的口径与这里无关（事件走事件层）。
+    const now = nowIsoUtc()
+    const expiresAt = isoAfterMsUtc(config.sessionTtlMs)
     const touch = db.transaction(() => {
       renewSession(db, found.session.id, { lastUsedAt: now, expiresAt })
       touchLastSeen(db, found.user.id, now)

@@ -2,7 +2,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { toDayKey } from '@shared/time'
 import { openMigratedDatabase, type Db } from '../db/index.js'
+import { toIso } from '../lib/time.js'
 import { appendEvents } from '../events/append.js'
 import { readAccountEvents } from '../events/event-store.js'
 import { readProjection } from '../events/projection-store.js'
@@ -42,7 +44,7 @@ afterAll(() => {
 })
 
 /** 新账号 + 一条 `settings/updated`（时区与起始小时固化下来，测试才可确定地推算归属日） */
-function freshAccount(dayStartHour = 4): string {
+function freshAccount(dayStartHour = 4, timeZone = TZ): string {
   seq += 1
   const id = `u-${seq}`
   insertUser(db, {
@@ -58,7 +60,7 @@ function freshAccount(dayStartHour = 4): string {
       {
         type: SETTINGS_UPDATED_TYPE,
         occurredAt: '2026-09-20T10:00:00+08:00',
-        payload: { timeZone: TZ, dayStartHour },
+        payload: { timeZone, dayStartHour },
       },
     ]),
   )()
@@ -389,5 +391,117 @@ describe('表 = 重放：服务只经事件层写投影（ADR-012 §4 item 2）'
 
     rebuildProjection(db, account)
     expect(readProjection(db, account)).toEqual(incremental)
+  })
+})
+
+/**
+ * ★ 四列自洽：`occurred_at` 的偏移取自**账号时区**，不是进程时区（ADR-010 §1）。
+ *
+ * 这是阶段 3 独立验证的整改项。被证伪的形态是：
+ *
+ * ```
+ * 账号设置 UTC、dayStartHour=4，进程 TZ = UTC+14 时写入：
+ *   occurred_at = "2026-10-10T16:00:00+14:00"   ← 偏移来自进程
+ *   timezone    = "UTC"                          ← 来自账号设置
+ *   day_key     = "2026-10-09"
+ * 绝对时刻没错、day_key 也没错，但两列互相解释不通：
+ * 审计者不知道写入瞬间的进程 TZ（这一项根本没被记录），无法仅凭事件行复算 day_key。
+ * ```
+ *
+ * 修法之后，**仅凭事件行**（`occurred_at` + `timezone` + `day_start_hour`）
+ * 就能复算出同一 `day_key`——这正是 ADR-001 §4 给这几列的可解释性。
+ * 期望值是**硬编码的已知偏移**，不拿被测代码反算，避免自证。
+ */
+describe('★ occurred_at 的偏移取自账号时区（ADR-010 §1）', () => {
+  /**
+   * 挑一个**与进程时区偏移不同**的账号时区（外加它在该瞬间的已知偏移）。
+   * 本组用例的意义全在「两者不同」，而进程时区随机器而变——
+   * 候选里必有一个与进程不同（三个候选的偏移两两不同），故用例在任何机器上都不空转。
+   */
+  function zoneDifferingFromProcess(instant: Date): { zone: string; offset: string } {
+    const processMinutes = -instant.getTimezoneOffset() // 东为正
+    const candidates = [
+      { zone: 'UTC', offset: '+00:00', minutes: 0 },
+      { zone: 'Asia/Kathmandu', offset: '+05:45', minutes: 345 },
+      { zone: 'America/New_York', offset: '-04:00', minutes: -240 }, // 2026-10-10 为 EDT
+    ]
+    const picked = candidates.find((candidate) => candidate.minutes !== processMinutes)
+    if (picked === undefined) throw new Error('三个候选时区都与进程时区同偏移，本用例无法成立')
+    return { zone: picked.zone, offset: picked.offset }
+  }
+
+  it('★ 账号时区 ≠ 进程时区：四列自洽，仅凭事件行即可复算 day_key', () => {
+    const instant = at('2026-10-10T06:00:00Z')
+    const { zone, offset } = zoneDifferingFromProcess(instant)
+    const account = freshAccount(4, zone)
+
+    const result = inTx(() => arrive(db, account, instant))
+    const event = arrivalEvent(account)
+
+    // ① 偏移取自账号时区（硬编码期望：UTC → +00:00）
+    expect(result.day.arrivedAt.endsWith(offset)).toBe(true)
+    expect(event.occurredAt).toBe(result.day.arrivedAt)
+
+    // ② 进程时区确实与账号时区不同 —— 这一条保证本用例不是空转。
+    //    修复前 event.occurredAt 走的就是 toIso（进程时区），这里会当场失败。
+    expect(toIso(instant)).not.toBe(event.occurredAt)
+
+    // ③ 四列自洽 + 仅凭事件行复算 day_key 得同一值（ADR-001 §4 的可解释性）
+    expect(event.timezone).toBe(zone)
+    expect(event.dayStartHour).toBe(4)
+    expect(
+      toDayKey(new Date(event.occurredAt), {
+        timeZone: event.timezone,
+        dayStartHour: event.dayStartHour,
+      }),
+    ).toBe(event.dayKey)
+
+    // ④ 绝对时刻分毫未变（改的只是渲染偏移）
+    expect(Date.parse(event.occurredAt)).toBe(instant.getTime())
+  })
+
+  it('★ 偏移是**该瞬间**的偏移而不是常量：跨 DST 的两个瞬间各按当季偏移渲染', () => {
+    // 2026 年美国夏令时于 11-01 结束：10-30 是 EDT(-04:00)，11-05 是 EST(-05:00)
+    const summer = at('2026-10-30T12:00:00Z')
+    const winter = at('2026-11-05T12:00:00Z')
+    const account = freshAccount(0, 'America/New_York')
+
+    const first = inTx(() => arrive(db, account, summer))
+    const second = inTx(() => arrive(db, account, winter))
+
+    expect(first.day.arrivedAt.endsWith('-04:00')).toBe(true)
+    expect(second.day.arrivedAt.endsWith('-05:00')).toBe(true)
+
+    // 两行各自都可复算（常量偏移的写法会在其中一行上算错）
+    for (const event of readAccountEvents(db, account).filter(
+      (row) => row.type === CHECKIN_ARRIVED_TYPE,
+    )) {
+      expect(
+        toDayKey(new Date(event.occurredAt), {
+          timeZone: event.timezone,
+          dayStartHour: event.dayStartHour,
+        }),
+      ).toBe(event.dayKey)
+    }
+  })
+
+  it('离开事件的两列同样同源（day_key 继承自到达，`occurred_at` / `timezone` 仍按账号时区）', () => {
+    const instant = at('2026-10-10T06:00:00Z')
+    const { zone, offset } = zoneDifferingFromProcess(instant)
+    const account = freshAccount(4, zone)
+
+    inTx(() => arrive(db, account, at('2026-10-10T05:00:00Z')))
+    const closed = inTx(() => leave(db, account, instant))
+    const left = readAccountEvents(db, account).find((event) => event.type === CHECKIN_LEFT_TYPE)!
+
+    expect(left.timezone).toBe(zone)
+    expect(left.occurredAt.endsWith(offset)).toBe(true)
+    expect(Date.parse(left.occurredAt)).toBe(instant.getTime())
+    // 唯一一处**不能**用 occurred_at 复算 day_key 的地方（ADR-012 §5 的收窄）：
+    // 离开的归属日继承自它所配对的到达，而不是它自己时刻的折算结果。
+    expect(left.dayKey).toBe(closed.day.dayKey)
+    expect(left.dayKey).toBe(
+      readAccountEvents(db, account).find((event) => event.type === CHECKIN_ARRIVED_TYPE)!.dayKey,
+    )
   })
 })

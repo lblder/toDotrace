@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { Db } from '../db/connection.js'
 import { isDayKey, toDayKey } from '@shared/time'
 import { invalidInput } from '../lib/errors.js'
-import { toIso } from '../lib/time.js'
+import { toIsoInZone } from '../lib/time.js'
 import { isUuidV7, uuidv7 } from '../lib/uuid.js'
 import { isBoundaryEventType } from './definitions/system.js'
 import { findEvent, insertEvents, readMaxEventId, readRevokedBatchIds } from './event-store.js'
@@ -43,7 +43,11 @@ export function appendEvents(db: Db, accountId: string, drafts: readonly EventDr
   const context: PrepareContext = {
     accountId,
     settings,
-    appendedAt: toIso(new Date()),
+    // `appended_at` 是服务端接收时刻（绝对时刻），偏移按**账号时区**渲染：
+    // ADR-010 §1 要求进程时区不进入任何持久化数据，而这一列就落在事件行上。
+    // （逐条草稿可用 `timezone` 覆盖行上的时区，但 `appended_at` 是一批一个值，
+    //  取账号设置——它解释的是「服务端何时收到」，不是「这条事件属于哪个时区」。）
+    appendedAt: toIsoInZone(new Date(), settings.timeZone),
     // 一次调用 = 一个批次（ADR-006 §1）：未显式给出 batchId 的草稿共用它。
     // 导入的事件各自携带原 batchId（ADR-010 §3），故允许逐条覆盖。
     defaultBatchId: uuidv7(),

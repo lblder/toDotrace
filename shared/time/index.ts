@@ -10,12 +10,15 @@
  *   禁止 `toISOString().slice(0, 10)` 这类 UTC 序列化切片当日本地日。
  */
 import {
+  MAX_RENDERABLE_INSTANT_MS,
+  MIN_RENDERABLE_INSTANT_MS,
   MS_PER_DAY,
   assertDayStartHour,
   calendarMs,
   dayKeyFromCalendarMs,
   daysInMonth,
   localParts,
+  offsetMsAt,
   resolveLocalInstant,
 } from './internal'
 
@@ -262,4 +265,64 @@ export function formatDayKey(dk: DayKey, style: 'short' | 'long' = 'short'): str
   }
   const { year, month, day } = parseDayKey(dk)
   return style === 'long' ? `${year}年${month}月${day}日` : `${month}月${day}日`
+}
+
+/** 两位补零（月 / 日 / 时 / 分 / 秒） */
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+/** 四位补零（年）。年域 0001–9999 已在入口拦掉，故不会出现 5 位年份 */
+function pad4(value: number): string {
+  return String(value).padStart(4, '0')
+}
+
+/**
+ * 偏移取整到整分，**半值远离零**（对称）。
+ *
+ * 与 `Math.round` 的差别只在恰好 :30 秒的偏移上：`Math.round(-17.5)` 得 -17（向 +∞），
+ * 而这里得 -18，与正向的 +18 对称。见 `toIsoInZone` 的整分取舍。
+ */
+function roundToMinute(offsetMs: number): number {
+  const minutes = offsetMs / 60_000
+  return minutes < 0 ? -Math.round(-minutes) : Math.round(minutes)
+}
+
+/**
+ * 把瞬间渲染成**以 `timeZone` 为偏移**的 ISO 8601 串（ADR-009 §9，v1.2）。
+ *
+ * 偏移是该瞬间在该时区的**实际偏移**（含 DST），不是常量；墙钟与偏移取自**同一个瞬间**。
+ * 全程不碰进程时区——这是 ADR-010 §1 的要求（进程时区不进入任何持久化数据）。
+ *
+ * 语义边界（§9 已钉死，逐条有测试）：
+ *
+ * - **整分渲染**：1972 年前的 LMT 偏移不是整分钟（`Europe/Amsterdam` 1880 年为
+ *   `+00:17:30`），渲染为 `+00:18`，**差 30 秒**——该取舍由 §9 显式记录，当前不可达；
+ * - **秒精度**：毫秒被截断（ADR-010 §1 的 `occurred_at` 同为此形态）；
+ * - **年域与 DayKey 同界**（0001–9999）：界外抛 `RangeError`（理由见 `internal.ts` 的常量注释）；
+ * - **时区名大小写不敏感**（`Intl` 会规范化）；判据是「`Intl` **无法解析**」而非
+ *   「与 IANA 注册表逐字不符」，故 `asia/shanghai` 合法而 `Not/AZone` 抛 `RangeError`。
+ *
+ * @param instant 待渲染的瞬间（`Invalid Date` 抛 `RangeError`）
+ * @param timeZone IANA 时区名，即输出串尾部偏移的取处
+ * @throws RangeError 当 `instant` 非法 / 超出 0001–9999，或 `timeZone` 无法解析
+ */
+export function toIsoInZone(instant: Date, timeZone: string): string {
+  const ms = instant.getTime()
+  if (Number.isNaN(ms)) {
+    throw new RangeError('toIsoInZone：Invalid Date 无法渲染')
+  }
+  if (ms < MIN_RENDERABLE_INSTANT_MS || ms > MAX_RENDERABLE_INSTANT_MS) {
+    throw new RangeError(`toIsoInZone：瞬间超出可渲染的年域（0001–9999）：${instant.toISOString()}`)
+  }
+
+  const parts = localParts(instant, timeZone)
+  const offsetMinutes = roundToMinute(offsetMsAt(ms, timeZone))
+  const sign = offsetMinutes < 0 ? '-' : '+'
+  const absolute = Math.abs(offsetMinutes)
+
+  const date = `${pad4(parts.year)}-${pad2(parts.month)}-${pad2(parts.day)}`
+  const time = `${pad2(parts.hour)}:${pad2(parts.minute)}:${pad2(parts.second)}`
+  const offset = `${sign}${pad2(Math.floor(absolute / 60))}:${pad2(absolute % 60)}`
+  return `${date}T${time}${offset}`
 }

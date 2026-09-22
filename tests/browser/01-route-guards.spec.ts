@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { seedMember, seedOwner } from './harness/api'
 import { gotoHash, HASH, expectScreen, trackHashTrail, hashTrail, type RouteName } from './harness/routes'
 import { signInAs } from './harness/session'
-import { startStack, type Stack } from './harness/stack'
+import { serverLogOnFailure, startStack, type Stack } from './harness/stack'
 
 /**
  * 路由守卫矩阵。
@@ -29,6 +29,10 @@ let fresh: Stack
 let seeded: Stack
 let ownerToken = ''
 let memberToken = ''
+
+// 本文件有两套栈（未就绪 / 已就绪），失败时两边的服务端日志都要留下——
+// 出了问题首先要分清是哪一套栈、哪个请求。见 harness/stack.ts 的 serverLogOnFailure。
+serverLogOnFailure(() => [fresh, seeded])
 
 test.beforeAll(async () => {
   ;[fresh, seeded] = await Promise.all([startStack(), startStack()])

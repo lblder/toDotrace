@@ -16,6 +16,16 @@ export const MS_PER_DAY = 86_400_000
 const DAYS_PER_400_YEARS = 146_097
 const MS_PER_400_YEARS = DAYS_PER_400_YEARS * MS_PER_DAY
 
+/**
+ * 可渲染瞬间的年域边界，与 DayKey 的 **0001–9999** 同界（`isDayKey` / `makeDayKey`）。
+ *
+ * 用**瞬间**把关而不是「渲染出的年份」：`localParts` 走无纪元公历（`gregory`），
+ * 1 BC 的瞬间会被报成「2 年」——拿年份判断抓不住它，拿瞬间一抓就中。
+ * 界外两种都不该悄悄产出：10000 年会渲染成 5 位年份（不是合法 ISO 8601 短式）。
+ */
+export const MIN_RENDERABLE_INSTANT_MS = -62_135_596_800_000 // 0001-01-01T00:00:00Z
+export const MAX_RENDERABLE_INSTANT_MS = 253_402_300_799_999 // 9999-12-31T23:59:59.999Z
+
 /** 时区墙钟分量（当地日历 + 当地时刻） */
 export interface LocalParts {
   year: number

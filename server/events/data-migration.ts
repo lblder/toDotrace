@@ -1,5 +1,4 @@
 import type { Db } from '../db/connection.js'
-import { toIso } from '../lib/time.js'
 import { appendEvents } from './append.js'
 import { SETTINGS_UPDATED_TYPE } from './definitions/settings.js'
 import { initialSettingsDraft } from './settings.js'
@@ -51,16 +50,16 @@ export function backfillAccountSettings(db: Db, now: Date = new Date()): string[
 
   if (missing.length === 0) return []
 
-  // 时刻取一次、共用：这条事件的 occurred_at 与「取哪个时区」必须是**同一个瞬间**，
-  // 否则「为什么这个账号是这个时区」在某些运行方式下解释不通。
-  // 时区本身由 initialSettingsDraft → serverTimeZone() 在**此处**取值（迁移时，不是读时）。
-  const occurredAt = toIso(now)
+  // 只传**时刻**，不自己渲染串：时区取值（迁移时，不是读时）与 occurred_at 的偏移
+  // 由 `initialSettingsDraft` 内部一次完成、同源（ADR-010 §1：事件行的偏移必须取自
+  // 同一行的 `timezone` 列）。这里负责的是另一半——`now` 只取一次，让所有补写的账号
+  // 落在同一个瞬间，否则「为什么这个账号是这个时区」在某些运行方式下解释不通。
   const accountIds = missing.map((row) => row.id)
 
   // 全部账号一个事务：要么都补上，要么一条不写——不在库里留下「补了一半」的中间态。
   runInTransaction(db, () => {
     for (const accountId of accountIds) {
-      appendEvents(db, accountId, [initialSettingsDraft(occurredAt)])
+      appendEvents(db, accountId, [initialSettingsDraft(now)])
     }
   })
 

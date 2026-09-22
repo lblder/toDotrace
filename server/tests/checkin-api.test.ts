@@ -324,6 +324,45 @@ describe('GET /days 的数据（升序、闭区间、只含本账号）', () => 
   })
 })
 
+describe('★ occurred_at 的偏移取自账号时区，不是进程时区（ADR-010 §1）', () => {
+  it('账号时区设成 UTC 后打卡：库内四列自洽，仅凭事件行即可复算 day_key', async () => {
+    const account = await freshMember()
+    // 把账号时区改成 UTC（进程时区通常是 +08:00，两者不同源——正是被证伪的那一态）
+    ctx.db.transaction(() =>
+      appendEvents(ctx.db, account.id, [
+        {
+          type: SETTINGS_UPDATED_TYPE,
+          occurredAt: '2026-09-22T00:00:00+00:00',
+          payload: { timeZone: 'UTC', dayStartHour: 4 },
+        },
+      ]),
+    )()
+
+    const res = await api(ctx, 'POST', '/api/checkin/arrive', { token: account.token })
+    expect(res.status).toBe(200)
+
+    const row = ctx.db
+      .prepare('SELECT occurred_at, timezone, day_key, day_start_hour FROM events WHERE account_id = ? AND type = ?')
+      .get(account.id, CHECKIN_ARRIVED_TYPE) as {
+      occurred_at: string
+      timezone: string
+      day_key: string
+      day_start_hour: number
+    }
+
+    expect(row.timezone).toBe('UTC')
+    expect(row.occurred_at.endsWith('+00:00')).toBe(true)
+    expect(res.body.day.arrivedAt).toBe(row.occurred_at)
+    // 审计者只拿这一行就能复算出同一个 day_key（ADR-001 §4 的可解释性）
+    expect(
+      toDayKey(new Date(row.occurred_at), {
+        timeZone: row.timezone,
+        dayStartHour: row.day_start_hour,
+      }),
+    ).toBe(row.day_key)
+  })
+})
+
 describe('★ 接线：HTTP 打卡之后，days 投影 == 全量重建结果（ADR-012 §4 item 3 / ADR-010 §5）', () => {
   it('真实请求写入的投影经得起重建，且与重放结果逐字段一致', async () => {
     const account = await freshMember()

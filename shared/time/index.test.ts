@@ -24,6 +24,7 @@ import {
   makeDayKey,
   parseDayKey,
   toDayKey,
+  toIsoInZone,
   today,
   weekEnd,
   weekKey,
@@ -906,6 +907,180 @@ describe('§8 范围与参数校验', () => {
       expect(addMonthsClamped('2026-01-31', 14)).toBe(first)
       expect(addMonths('2026-01-15', 14)).toBe(addMonths('2026-01-15', 14))
       expect(addYearsClamped('2028-02-29', 1)).toBe('2029-02-28')
+    }
+  })
+})
+
+/**
+ * ADR-009 §9（v1.2）：瞬间 → 指定时区的 ISO 串。
+ *
+ * 期望值纪律同本文件开头：墙钟用**原生 `Intl.DateTimeFormat`** 现算、不经被测实现反推；
+ * 偏移取该瞬间的真实偏移，并逐条与「独立算出的墙钟」比对。
+ */
+describe('toIsoInZone · 瞬间 → 指定时区的 ISO 串（ADR-009 §9）', () => {
+  /** 独立证据：原生 Intl 直接算某瞬间在某时区的墙钟（不经被测模块） */
+  const wallClockOf = (instant: Date, timeZone: string): string => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      calendar: 'gregory',
+      numberingSystem: 'latn',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(instant)
+    const read = (type: Intl.DateTimeFormatPartTypes): string => {
+      const found = parts.find((part) => part.type === type)
+      if (found === undefined) throw new Error(`formatToParts 缺少 ${type}`)
+      return found.value
+    }
+    return `${read('year').padStart(4, '0')}-${read('month')}-${read('day')}T${read('hour')}:${read('minute')}:${read('second')}`
+  }
+
+  /** 从渲染串尾部取出偏移的分钟数（东为正），用于「与进程时区无关」的独立比对 */
+  const offsetMinutesOf = (iso: string): number => {
+    const matched = /([+-])(\d{2}):(\d{2})$/.exec(iso)
+    if (matched === null) throw new Error(`串尾没有偏移：${iso}`)
+    const sign = matched[1]
+    const hh = matched[2]
+    const mm = matched[3]
+    if (sign === undefined || hh === undefined || mm === undefined) {
+      throw new Error(`偏移解析失败：${iso}`)
+    }
+    return (sign === '-' ? -1 : 1) * (Number(hh) * 60 + Number(mm))
+  }
+
+  const ISO_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/
+
+  it('形状为 YYYY-MM-DDTHH:MM:SS±HH:MM，且当代整分偏移往返保真', () => {
+    const cases: ReadonlyArray<readonly [Date, string]> = [
+      [new Date(Date.UTC(2026, 8, 22, 12, 34, 56)), 'UTC'],
+      [new Date(Date.UTC(2026, 8, 22, 12, 34, 56)), 'Asia/Shanghai'],
+      [new Date(Date.UTC(2026, 8, 22, 12, 34, 56)), 'America/New_York'],
+      [new Date(Date.UTC(2026, 0, 15, 12, 0, 0)), 'Pacific/Chatham'], // +13:45
+      [new Date(Date.UTC(2026, 0, 15, 12, 0, 0)), 'Asia/Kathmandu'], // +05:45
+      [new Date(Date.UTC(2026, 5, 1, 0, 0, 0)), 'Europe/London'],
+    ]
+    for (const [instant, timeZone] of cases) {
+      const iso = toIsoInZone(instant, timeZone)
+      expect(iso).toMatch(ISO_SHAPE)
+      // 墙钟由原生 Intl 独立给出
+      expect(iso.startsWith(wallClockOf(instant, timeZone))).toBe(true)
+      // 当代偏移恒为整分 ⇒ 往返必须精确到毫秒
+      expect(new Date(iso).getTime()).toBe(instant.getTime())
+    }
+  })
+
+  it('偏移随 DST 变化：同一时区、两个瞬间给出不同偏移', () => {
+    const winter = new Date(Date.UTC(2026, 0, 15, 12, 0, 0))
+    const summer = new Date(Date.UTC(2026, 6, 15, 12, 0, 0))
+    expect(toIsoInZone(winter, 'America/New_York')).toBe('2026-01-15T07:00:00-05:00')
+    expect(toIsoInZone(summer, 'America/New_York')).toBe('2026-07-15T08:00:00-04:00')
+    expect(offsetMinutesOf(toIsoInZone(winter, 'America/New_York'))).toBe(-300)
+    expect(offsetMinutesOf(toIsoInZone(summer, 'America/New_York'))).toBe(-240)
+  })
+
+  it('春季跳变日：02:00 不存在，跳变瞬间直接到 03:00（NY 2026-03-08）', () => {
+    const before = new Date(Date.UTC(2026, 2, 8, 6, 59, 59))
+    const at = new Date(Date.UTC(2026, 2, 8, 7, 0, 0))
+    expect(toIsoInZone(before, 'America/New_York')).toBe('2026-03-08T01:59:59-05:00')
+    expect(toIsoInZone(at, 'America/New_York')).toBe('2026-03-08T03:00:00-04:00')
+    expect(at.getTime() - before.getTime()).toBe(1000)
+  })
+
+  it('秋季回拨日：01:xx 出现两次，晚的瞬间墙钟反而更早（NY 2026-11-01）', () => {
+    const first = new Date(Date.UTC(2026, 10, 1, 5, 59, 59))
+    const second = new Date(Date.UTC(2026, 10, 1, 6, 0, 0))
+    expect(toIsoInZone(first, 'America/New_York')).toBe('2026-11-01T01:59:59-04:00')
+    expect(toIsoInZone(second, 'America/New_York')).toBe('2026-11-01T01:00:00-05:00')
+    // 晚 1 秒的瞬间渲染出**更早**的墙钟——偏移若被当成常量，这一条必挂
+    expect(second.getTime()).toBeGreaterThan(first.getTime())
+    expect(toIsoInZone(second, 'America/New_York') < toIsoInZone(first, 'America/New_York')).toBe(true)
+  })
+
+  it('账号时区 ≠ 进程时区：结果与进程时区无关（任何机器上都成立）', () => {
+    const instant = new Date(Date.UTC(2026, 8, 22, 12, 34, 56))
+    const processOffsetMinutes = -instant.getTimezoneOffset()
+    const candidates = ['UTC', 'Asia/Shanghai', 'America/New_York', 'Pacific/Chatham', 'Asia/Kathmandu']
+    // 不依赖运行环境 TZ：从候选里挑一个与进程偏移**不同**的时区来断言
+    const chosen = candidates.find(
+      (timeZone) => offsetMinutesOf(toIsoInZone(instant, timeZone)) !== processOffsetMinutes,
+    )
+    expect(chosen, '候选里应有一个与进程偏移不同的时区').toBeDefined()
+    if (chosen === undefined) return
+
+    const iso = toIsoInZone(instant, chosen)
+    expect(offsetMinutesOf(iso)).not.toBe(processOffsetMinutes) // 进程时区没有泄漏进来
+    expect(iso.startsWith(wallClockOf(instant, chosen))).toBe(true) // 墙钟仍是该时区的
+    expect(new Date(iso).getTime()).toBe(instant.getTime())
+  })
+
+  it('非法时区名抛 RangeError（判据是「Intl 无法解析」，不是「与 IANA 逐字不符」）', () => {
+    const instant = new Date(Date.UTC(2026, 8, 22, 12, 0, 0))
+    for (const bad of ['Not/AZone', '', 'UTC+8', 'Mars/Olympus']) {
+      expect(() => toIsoInZone(instant, bad)).toThrow(RangeError)
+    }
+  })
+
+  it('时区名大小写不敏感：变体与规范名结果相同（ADR-009 §9）', () => {
+    const instant = new Date(Date.UTC(2026, 8, 22, 12, 34, 56))
+    expect(toIsoInZone(instant, 'asia/shanghai')).toBe(toIsoInZone(instant, 'Asia/Shanghai'))
+    expect(toIsoInZone(instant, 'AMERICA/NEW_YORK')).toBe(toIsoInZone(instant, 'America/New_York'))
+  })
+
+  it('偏移按整分渲染：1880 年 LMT 的已知偏差（ADR-009 §9 显式记录，不回避）', () => {
+    const instant = new Date(Date.UTC(1880, 0, 1))
+    const iso = toIsoInZone(instant, 'Europe/Amsterdam')
+    // 墙钟精确（00:17:30），偏移渲染成整分 +00:18（真值 +00:17:30）
+    expect(iso).toBe('1880-01-01T00:17:30+00:18')
+    expect(iso.startsWith(wallClockOf(instant, 'Europe/Amsterdam'))).toBe(true)
+    // **取舍本身**写成断言：真偏移 +00:17:30 被**进位**到 +00:18，于是
+    // 「墙钟 − 偏移」反解出的瞬间比真值**早** 30 秒（差 30 秒，符号为负）
+    expect(new Date(iso).getTime() - instant.getTime()).toBe(-30_000)
+  })
+
+  it('负偏移的整分取整对称（不向 +∞ 偏）：1900 年 Pacific/Apia', () => {
+    const instant = new Date(Date.UTC(1900, 0, 1))
+    const iso = toIsoInZone(instant, 'Pacific/Apia')
+    // 真偏移 -686.93 分（-11:26:56）→ 整分 -11:27
+    expect(iso).toBe('1899-12-31T12:33:04-11:27')
+    expect(offsetMinutesOf(iso)).toBe(-687)
+  })
+
+  it('秒精度：毫秒被截断（ADR-010 §1 的 occurred_at 同为此形态）', () => {
+    const instant = new Date(Date.UTC(2026, 8, 22, 12, 34, 56, 789))
+    const iso = toIsoInZone(instant, 'Asia/Shanghai')
+    expect(iso).toBe('2026-09-22T20:34:56+08:00')
+    expect(instant.getTime() - new Date(iso).getTime()).toBe(789) // 截断量可精确说出
+  })
+
+  it('Invalid Date 抛 RangeError（沿用原生 Intl 的行为，不另造一套）', () => {
+    expect(() => toIsoInZone(new Date(Number.NaN), 'UTC')).toThrow(RangeError)
+  })
+
+  it('年域与 DayKey 同界（0001–9999）：界内可渲染，界外抛 RangeError', () => {
+    expect(toIsoInZone(new Date(-62_135_596_800_000), 'UTC')).toBe('0001-01-01T00:00:00+00:00')
+    expect(toIsoInZone(new Date(253_402_300_799_999), 'UTC')).toBe('9999-12-31T23:59:59+00:00')
+    // 界外两种都不会「悄悄产出」：10000 年渲染成 5 位年份（不是合法 ISO 8601 短式），
+    // 1 BC 会被无纪元的 Intl 报成「2 年」。故与 makeDayKey / isDayKey 同域抛错。
+    expect(() => toIsoInZone(new Date(253_402_300_800_000), 'UTC')).toThrow(RangeError)
+    expect(() => toIsoInZone(new Date(-62_135_596_800_001), 'UTC')).toThrow(RangeError)
+  })
+
+  it('纯函数：不读时钟，固定入参反复调用恒等', () => {
+    const instant = new Date(Date.UTC(2026, 8, 22, 12, 34, 56))
+    const first = toIsoInZone(instant, 'Asia/Kathmandu')
+    expect(first).toBe('2026-09-22T18:19:56+05:45')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      for (let i = 0; i < 5; i += 1) {
+        expect(toIsoInZone(instant, 'Asia/Kathmandu')).toBe(first)
+      }
+    } finally {
+      vi.useRealTimers()
     }
   })
 })
