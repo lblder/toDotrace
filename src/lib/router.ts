@@ -11,6 +11,7 @@
 export const ROUTE_NAMES = [
   'home',
   'checkin',
+  'tasks',
   'setup',
   'login',
   'register',
@@ -25,6 +26,7 @@ export const DEFAULT_ROUTE: RouteName = 'home'
 const ROUTE_PATHS: Record<RouteName, string> = {
   home: '/',
   checkin: '/checkin',
+  tasks: '/tasks',
   setup: '/setup',
   login: '/login',
   register: '/register',
@@ -35,6 +37,7 @@ const ROUTE_PATHS: Record<RouteName, string> = {
 const ROUTE_TITLES: Record<RouteName, string> = {
   home: '工作台',
   checkin: '打卡',
+  tasks: '任务',
   setup: '首次启动',
   login: '登录',
   register: '注册',
@@ -91,7 +94,7 @@ export function applyRouteTitle(name: RouteName): void {
 }
 
 /** 登录后才可达的白名单（不在此表的一律回工作台）；角色限制在下面单独判 */
-const AUTHED_ROUTES: readonly RouteName[] = ['home', 'checkin', 'invites']
+const AUTHED_ROUTES: readonly RouteName[] = ['home', 'checkin', 'tasks', 'invites']
 
 /**
  * 路由守卫的纯函数形态：给定「是否存在 owner」「是否已登录」「是否 owner」，

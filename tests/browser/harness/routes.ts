@@ -11,11 +11,12 @@ import { expect, type Page } from '@playwright/test'
  * 只断言地标的话，测不出重定向是否**落到地址栏**（深链接要靠地址可分享）。
  */
 
-export type RouteName = 'home' | 'checkin' | 'setup' | 'login' | 'register' | 'invites'
+export type RouteName = 'home' | 'checkin' | 'tasks' | 'setup' | 'login' | 'register' | 'invites'
 
 export const HASH: Readonly<Record<RouteName, string>> = {
   home: '#/',
   checkin: '#/checkin',
+  tasks: '#/tasks',
   setup: '#/setup',
   login: '#/login',
   register: '#/register',
@@ -34,6 +35,7 @@ export const HASH: Readonly<Record<RouteName, string>> = {
 const URL_PATTERN: Readonly<Record<RouteName, RegExp>> = {
   home: /\/$/,
   checkin: /#\/checkin$/,
+  tasks: /#\/tasks$/,
   setup: /#\/setup$/,
   login: /#\/login$/,
   register: /#\/register$/,
@@ -47,6 +49,7 @@ const LANDMARK: Readonly<Record<RouteName, { selector: string; text: string }>> 
   register: { selector: '#auth-title', text: '注册' },
   home: { selector: '#home-heading', text: '欢迎回来' },
   checkin: { selector: '#checkin-heading', text: '今日打卡' },
+  tasks: { selector: '#tasks-heading', text: '任务' },
   invites: { selector: '#invites-heading', text: '邀请码' },
 }
 

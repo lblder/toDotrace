@@ -8,6 +8,7 @@ import { BootScreen, ServiceUnavailableScreen } from './features/common/StatusSc
 import { HomePage } from './features/home/HomePage'
 import { InvitesPage } from './features/invites/InvitesPage'
 import { AppShell } from './features/shell/AppShell'
+import { TasksPage } from './features/tasks/TasksPage'
 import { useRoute } from './hooks/use-route'
 import { useSession } from './hooks/use-session'
 import { useSetupStatus } from './hooks/use-setup'
@@ -24,11 +25,17 @@ const SCREENS: Readonly<Record<RouteName, () => ReactElement | null>> = {
   register: RegisterPage,
   home: HomePage,
   checkin: CheckinPage,
+  tasks: TasksPage,
   invites: InvitesPage,
 }
 
 /** 登录后才有外壳（顶栏 + 导航）；账号三页自带整屏版式，不套壳 */
-const SHELLED: ReadonlySet<RouteName> = new Set<RouteName>(['home', 'checkin', 'invites'])
+const SHELLED: ReadonlySet<RouteName> = new Set<RouteName>([
+  'home',
+  'checkin',
+  'tasks',
+  'invites',
+])
 
 export function App() {
   const { route, navigate } = useRoute()

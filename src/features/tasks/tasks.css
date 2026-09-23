@@ -1,0 +1,697 @@
+/* 任务页 · 全部取 tokens.css 的令牌，不出现字面色值。
+   版式与打卡页同一套：一张卡一件事，卡片间距由 --space-5 控制。 */
+
+/* --- 页头 -------------------------------------------------------------- */
+
+.ta-tasks__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-tasks__eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-primary-text);
+}
+
+.ta-tasks__heading {
+  font-size: var(--fs-2xl);
+  color: var(--c-ink);
+}
+
+.ta-tasks__subtitle {
+  max-width: var(--layout-measure);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-base);
+}
+
+/* 「今天是哪天」这一行：它是服务端口径的展示，不是装饰 */
+.ta-tasks__todayLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--c-border);
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+}
+
+.ta-tasks__today {
+  font-size: var(--fs-lg);
+  color: var(--c-primary-text);
+  letter-spacing: var(--ls-tight);
+}
+
+.ta-tasks__sectionHeading {
+  font-size: var(--fs-lg);
+  color: var(--c-ink);
+}
+
+.ta-tasks__hint,
+.ta-tasks__empty {
+  color: var(--c-ink-muted);
+  font-size: var(--fs-md);
+  line-height: var(--lh-snug);
+}
+
+.ta-tasks__errorBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* --- 快速录入 ---------------------------------------------------------- */
+
+.ta-tasks__quick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-tasks__quickForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ta-tasks__quickRow {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ta-tasks__quickRow .ta-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ta-tasks__syntax {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-faint);
+  line-height: var(--lh-snug);
+}
+
+.ta-tasks__syntax code,
+.ta-tasks__released {
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-xs);
+  background: var(--c-bg-sunken);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+.ta-tasks__preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  background: var(--c-bg-sunken);
+}
+
+.ta-tasks__previewEmpty {
+  color: var(--c-ink-faint);
+  font-size: var(--fs-md);
+}
+
+.ta-tasks__previewLine {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.ta-tasks__previewKey {
+  flex: none;
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-ink-faint);
+}
+
+.ta-tasks__previewTitle {
+  font-size: var(--fs-base);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+.ta-tasks__previewNote {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+  line-height: var(--lh-snug);
+  overflow-wrap: anywhere;
+}
+
+/* 碎片：可取消。整块是「已识别」的证据，`×` 把它退回标题 */
+.ta-tasks__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ta-tasks__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-1) 2px var(--space-2);
+  border: 1px solid var(--c-primary);
+  border-radius: var(--radius-full);
+  background: var(--c-primary-soft);
+  color: var(--c-primary-text);
+  font-size: var(--fs-sm);
+}
+
+.ta-tasks__chipText {
+  white-space: nowrap;
+}
+
+.ta-tasks__chipCancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-base);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ta-tasks__chipCancel:hover:not(:disabled) {
+  background: var(--c-overdue-soft);
+  color: var(--c-overdue-text);
+}
+
+/* --- 工具条 ------------------------------------------------------------ */
+
+.ta-tasks__board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-tasks__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.ta-tasks__tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--c-bg-sunken);
+}
+
+.ta-tasks__tab {
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-ink-muted);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.ta-tasks__tab:hover {
+  color: var(--c-ink);
+}
+
+/* 当前视图：颜色 + 底色 + 字重三重表达，不单靠颜色 */
+.ta-tasks__tab--on {
+  background: var(--c-panel-raised);
+  color: var(--c-primary-text);
+  font-weight: var(--fw-medium);
+  box-shadow: var(--shadow-xs);
+}
+
+.ta-tasks__control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/*
+ * 窄控件（下拉、日期）。`min-width` 不是装饰：不写它时这几个 `<select>` 在
+ * shrink-to-fit 的父容器里会**塌成只有一个箭头那么宽**——选项文字一个字都看不见，
+ * 而页面不报任何错。这是真实浏览器里量出来的，`tsc` 与单测都看不见它。
+ */
+.ta-tasks__select {
+  min-height: var(--control-h-sm);
+  width: auto;
+  min-width: 9rem;
+}
+
+.ta-tasks__batch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-primary);
+  border-radius: var(--radius-md);
+  background: var(--c-primary-soft);
+}
+
+.ta-tasks__batchCount {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  color: var(--c-primary-text);
+}
+
+/* --- 任务行 ------------------------------------------------------------ */
+
+.ta-tasks__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ta-tasks__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--c-panel-raised);
+}
+
+/* 左缘的色条是**排序理由**的视觉回声（与徽标同一件事的两种呈现，不引入新信息） */
+.ta-tasks__row:has(.ta-tasks__bucket--0) {
+  border-left-color: var(--c-overdue);
+}
+
+.ta-tasks__row:has(.ta-tasks__bucket--5) {
+  border-left-color: var(--c-ink-faint);
+}
+
+.ta-tasks__row--done {
+  border-left-color: var(--c-success);
+}
+
+.ta-tasks__row--abandoned {
+  background: var(--c-bg-sunken);
+}
+
+.ta-tasks__rowMain {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.ta-tasks__select,
+.ta-tasks__check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  accent-color: var(--c-primary);
+  cursor: pointer;
+}
+
+.ta-tasks__check {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--c-success);
+}
+
+.ta-tasks__rowBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ta-tasks__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--fs-base);
+  color: var(--c-ink);
+}
+
+.ta-tasks__titleText {
+  overflow-wrap: anywhere;
+}
+
+/* 已完成：删除线 + 变淡（两种表达，不单靠颜色） */
+.ta-tasks__titleText--done {
+  color: var(--c-ink-muted);
+  text-decoration: line-through;
+}
+
+.ta-tasks__star {
+  color: var(--c-primary);
+}
+
+.ta-tasks__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+.ta-tasks__metaItem {
+  white-space: nowrap;
+}
+
+.ta-tasks__metaItem--overdue {
+  color: var(--c-overdue-text);
+}
+
+/* 排序理由徽标：档 0（逾期）与档 5（已放弃）各有一档专用色，其余中性 */
+.ta-tasks__bucket {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-ink-muted);
+  white-space: nowrap;
+}
+
+.ta-tasks__bucket--0 {
+  border-color: var(--c-overdue);
+  color: var(--c-overdue-text);
+  background: var(--c-overdue-soft);
+}
+
+.ta-tasks__bucket--5 {
+  color: var(--c-ink-faint);
+}
+
+.ta-tasks__bucket--6 {
+  border-color: var(--c-success);
+  color: var(--c-success-text);
+  background: var(--c-success-soft);
+}
+
+.ta-tasks__tag {
+  font-size: var(--fs-sm);
+  color: var(--c-primary-text);
+}
+
+.ta-tasks__history {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-faint);
+}
+
+.ta-tasks__rowActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.ta-tasks__danger {
+  color: var(--c-overdue-text);
+}
+
+.ta-tasks__statusBadge {
+  border-color: var(--c-ink-faint);
+}
+
+.ta-tasks__rowError {
+  margin-top: var(--space-1);
+}
+
+/* --- 步骤 -------------------------------------------------------------- */
+
+.ta-tasks__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-left: var(--space-1);
+}
+
+.ta-tasks__stepsProgress {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.ta-tasks__stepList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ta-tasks__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+}
+
+.ta-tasks__step input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--c-success);
+  cursor: pointer;
+}
+
+/* 勾选态：删除线 + 变淡。**它挂在本轮的勾选上**（ADR-013 §4.12） */
+.ta-tasks__stepText--done {
+  text-decoration: line-through;
+  color: var(--c-ink-faint);
+}
+
+/* --- 详情 -------------------------------------------------------------- */
+
+.ta-tasks__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--c-bg-sunken);
+}
+
+.ta-tasks__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: 0;
+}
+
+.ta-tasks__facts dt {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--c-ink-faint);
+}
+
+.ta-tasks__facts dd {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--c-ink);
+}
+
+.ta-tasks__fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--c-border);
+}
+
+.ta-tasks__fieldsetTitle {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink);
+}
+
+.ta-tasks__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-3);
+}
+
+.ta-tasks__notes {
+  min-height: 5rem;
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+}
+
+.ta-tasks__radios {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+}
+
+.ta-tasks__radios legend {
+  padding: 0 var(--space-1);
+}
+
+.ta-tasks__radios label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.ta-tasks__radios input {
+  accent-color: var(--c-primary);
+}
+
+.ta-tasks__radios .ta-field__hint {
+  flex-basis: 100%;
+}
+
+.ta-tasks__recurrence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-tasks__weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.ta-tasks__detailActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* 轮次历史（明细里）：等宽体逐行列，它是「放弃不抹除历史」的证据 */
+.ta-tasks__historyBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--c-border);
+}
+
+.ta-tasks__historyList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+/* --- 项目 / 分组 / 备注 / 设置 ----------------------------------------- */
+
+.ta-tasks__projects,
+.ta-tasks__note,
+.ta-tasks__settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ta-tasks__projectList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ta-tasks__project {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-panel-raised);
+  font-size: var(--fs-md);
+}
+
+.ta-tasks__projectName {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--fw-medium);
+}
+
+.ta-tasks__projectActions {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.ta-tasks__outside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--c-border-strong);
+}
+
+.ta-tasks__groupHeading {
+  font-size: var(--fs-md);
+  color: var(--c-ink-muted);
+}
+
+.ta-tasks__undo {
+  align-items: center;
+}
+
+/* --- 窄屏 -------------------------------------------------------------- */
+
+@media (max-width: 40rem) {
+  .ta-tasks__rowMain {
+    flex-wrap: wrap;
+  }
+
+  .ta-tasks__rowActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .ta-tasks__quickRow {
+    flex-wrap: wrap;
+  }
+
+  .ta-tasks__quickRow .ta-btn {
+    width: 100%;
+  }
+}

@@ -181,3 +181,143 @@ export async function seedMember(
   })
   return { member, inviteCode: issued.invite.code }
 }
+
+/* ---------------------------------------------------------------------------
+   任务（ADR-017 §1.1 / §1.2）
+
+   用途与上面那段一样：**把界面推到某个状态**（建一条带步骤的任务、
+   造一条落在项目区间外的任务），从而让浏览器端的用例只测它真正关心的那一段。
+   断言仍优先走界面；这里不做「界面应当做的事」。
+   --------------------------------------------------------------------------- */
+
+/** `TodoItem` 里本套用例会断言到的字段（其余照服务端原样收着，不重写整份契约） */
+export interface TaskItem {
+  readonly taskId: string
+  readonly occurrenceKey: string
+  readonly title: string
+  readonly status: 'not_started' | 'in_progress' | 'abandoned'
+  readonly completedAt: string | null
+  readonly completedDayKey: string | null
+  readonly pending: boolean
+  readonly recurring: boolean
+  readonly overdue: boolean
+  readonly plannedDate: string | null
+  readonly plannedWeek: string | null
+  readonly dueDate: string | null
+  readonly projectId: string | null
+  readonly tags: readonly string[]
+  readonly reasons: readonly string[]
+  readonly steps: readonly {
+    readonly id: string
+    readonly title: string
+    readonly checkedAt: string | null
+  }[]
+}
+
+export interface TaskListPayload {
+  /** 服务端回带的今日归属日——**前端不得自己算它**（ADR-015 §6） */
+  readonly today: string
+  readonly items: readonly TaskItem[]
+}
+
+export function listTasks(
+  stack: Stack,
+  token: string,
+  scope: 'today' | 'week' | 'all' = 'today',
+): Promise<TaskListPayload> {
+  return ok<TaskListPayload>(stack, `/api/tasks?scope=${scope}`, { token })
+}
+
+export function listProjectTasks(
+  stack: Stack,
+  token: string,
+  projectId: string,
+): Promise<TaskListPayload> {
+  return ok<TaskListPayload>(stack, `/api/tasks?scope=project&projectId=${projectId}`, { token })
+}
+
+/** 建一条任务。`taskId` 按 ADR-017 §5 由**调用方**生成——这里是夹具，给一个确定的值 */
+export function createTask(
+  stack: Stack,
+  token: string,
+  input: {
+    taskId: string
+    title: string
+    plannedDate?: string
+    plannedWeek?: string
+    dueDate?: string
+    projectId?: string
+    tags?: readonly string[]
+    steps?: readonly { readonly id: string; readonly title: string }[]
+  },
+): Promise<{ task: { id: string }; created: boolean }> {
+  return ok(stack, '/api/tasks', { method: 'POST', token, body: input })
+}
+
+export function setTaskStatus(
+  stack: Stack,
+  token: string,
+  taskId: string,
+  to: 'not_started' | 'in_progress' | 'abandoned',
+): Promise<{ task: { id: string } }> {
+  return ok(stack, `/api/tasks/${taskId}/status`, { method: 'POST', token, body: { to } })
+}
+
+export function deleteTask(
+  stack: Stack,
+  token: string,
+  taskId: string,
+): Promise<{ taskId: string; batchId: string }> {
+  return ok(stack, `/api/tasks/${taskId}`, { method: 'DELETE', token })
+}
+
+/** 撤销一个批次（ADR-017 §8）——删除与批量顺延各产生一个批次 */
+export function undoBatch(
+  stack: Stack,
+  token: string,
+  batchId: string,
+): Promise<{ batchId: string; revoked: true }> {
+  return ok(stack, '/api/undo', { method: 'POST', token, body: { batchId } })
+}
+
+/** 从列表里按标题找一行；找不到就抛错，免得后面的断言报出看不懂的东西 */
+export function itemByTitle(payload: TaskListPayload, title: string): TaskItem {
+  const found = payload.items.find((item) => item.title === title)
+  if (found === undefined) {
+    const titles = payload.items.map((item) => item.title).join('、')
+    throw new Error(`列表里没有标题为「${title}」的任务。当前有：${titles || '（空）'}`)
+  }
+  return found
+}
+
+/* ---------------------------------------------------------------------------
+   项目（ADR-017 §1.3）与设置（§1.5）
+   --------------------------------------------------------------------------- */
+
+export function createProject(
+  stack: Stack,
+  token: string,
+  input: { projectId: string; name: string; startsOn: string; endsOn: string },
+): Promise<{ project: { id: string } }> {
+  return ok(stack, '/api/projects', { method: 'POST', token, body: input })
+}
+
+export interface SettingsPayload {
+  readonly timeZone: string
+  readonly dayStartHour: number
+  readonly updatedAt: string
+  /** 新设置**开始生效**的归属日（= 该账号当前的 today，ADR-017 §7） */
+  readonly affectsFrom: string
+}
+
+export function getSettings(stack: Stack, token: string): Promise<SettingsPayload> {
+  return ok<SettingsPayload>(stack, '/api/settings', { token })
+}
+
+export function patchSettings(
+  stack: Stack,
+  token: string,
+  input: { readonly timeZone?: string; readonly dayStartHour?: number },
+): Promise<SettingsPayload> {
+  return ok<SettingsPayload>(stack, '/api/settings', { method: 'PATCH', token, body: input })
+}

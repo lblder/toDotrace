@@ -145,8 +145,15 @@ function readEnvelope(payload: unknown): { code: string; message: string } | nul
   return { code, message }
 }
 
+/**
+ * 允许的动词。阶段 4 起 ADR-017 §1 用到了 `PATCH` / `PUT` / `DELETE`，
+ * 故这里不再只有两个。**收窄成字面量联合而不是 `string`**：
+ * 写错一个动词在类型层就报错，而不是运行时收到一个 404。
+ */
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
+
 interface RequestOptions {
-  readonly method: 'GET' | 'POST'
+  readonly method: HttpMethod
   readonly path: string
   readonly body?: unknown
   /** 是否附带 Authorization 头（ADR-008：除首启与登录注册外均需要） */
