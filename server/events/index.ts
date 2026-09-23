@@ -1,9 +1,9 @@
 /**
- * 事件存储与重放（ADR-010 / ADR-011 阶段 2）。
+ * 事件存储与重放（ADR-010 阶段 2，各阶段陆续登记自己的类型）。
  *
  * 分层：
  *   definitions/  事件类型定义（schema + apply）——**注册表的唯一来源**
- *                 （system / settings / recurrence / checkin 四组）
+ *                 （system / settings / checkin / notes / tasks / projects 六组）
  *   registry.ts   注册表：未登记的 type 一律拒绝
  *   event-store.ts     events 表读写
  *   projection-store.ts 投影表读写（**全仓唯一写投影表的地方**）
@@ -49,22 +49,79 @@ export {
   checkinPayloadSchema,
   type CheckinPayload,
 } from './definitions/checkin.js'
+/**
+ * `eventToCompletion` 的**唯一实现在 `@shared/tasks/rounds`**（ADR-013 §3 的跨越点之一：
+ * 「进」是 `toRecurrenceTemplate`、「出」是 `eventToCompletion`，两个都在那里）。
+ * 这里**只再导出、不重新实现**——`server/` 侧的调用方仍从本层取用，
+ * 但全仓只有一份实现（两处各写一份 = 两个真相，ADR-009 §1）。
+ */
+export { eventToCompletion } from '@shared/tasks/rounds'
 export {
-  RECURRENCE_TEMPLATE_TARGET_KIND,
-  eventToCompletion,
-  roundCompletedDefinition,
-  roundCompletedPayloadSchema,
-  templateCreatedDefinition,
-  templateCreatedPayloadSchema,
-  templateDeletedDefinition,
-  templateDeletedPayloadSchema,
-  templateUpdatedDefinition,
-  templateUpdatedPayloadSchema,
-  type RoundCompletedPayload,
-  type TemplateCreatedPayload,
-  type TemplateDeletedPayload,
-  type TemplateUpdatedPayload,
-} from './definitions/recurrence.js'
+  TASK_TARGET_KIND,
+  taskCreatedDefinition,
+  taskCreatedPayloadSchema,
+  taskDeletedDefinition,
+  taskDeletedPayloadSchema,
+  taskEventDefinitions,
+  taskOccurrenceCompletedDefinition,
+  taskOccurrenceCompletedPayloadSchema,
+  taskOccurrenceUncompletedDefinition,
+  taskOccurrenceUncompletedPayloadSchema,
+  taskReorderedDefinition,
+  taskReorderedPayloadSchema,
+  taskRescheduledDefinition,
+  taskRescheduledPayloadSchema,
+  taskStatusChangedDefinition,
+  taskStatusChangedPayloadSchema,
+  taskStepAddedDefinition,
+  taskStepAddedPayloadSchema,
+  taskStepRemovedDefinition,
+  taskStepRemovedPayloadSchema,
+  taskStepRenamedDefinition,
+  taskStepRenamedPayloadSchema,
+  taskStepToggledDefinition,
+  taskStepToggledPayloadSchema,
+  taskStepsReorderedDefinition,
+  taskStepsReorderedPayloadSchema,
+  taskUpdatedDefinition,
+  taskUpdatedPayloadSchema,
+  type TaskCreatedPayload,
+  type TaskDeletedPayload,
+  type TaskOccurrenceCompletedPayload,
+  type TaskOccurrenceUncompletedPayload,
+  type TaskReorderedPayload,
+  type TaskRescheduledPayload,
+  type TaskStatusChangedPayload,
+  type TaskStepAddedPayload,
+  type TaskStepRemovedPayload,
+  type TaskStepRenamedPayload,
+  type TaskStepToggledPayload,
+  type TaskStepsReorderedPayload,
+  type TaskUpdatedPayload,
+} from './definitions/tasks.js'
+export {
+  PROJECT_TARGET_KIND,
+  projectCreatedDefinition,
+  projectCreatedPayloadSchema,
+  projectCurrentChangedDefinition,
+  projectCurrentChangedPayloadSchema,
+  projectDeletedDefinition,
+  projectDeletedPayloadSchema,
+  projectEventDefinitions,
+  projectUpdatedDefinition,
+  projectUpdatedPayloadSchema,
+  type ProjectCreatedPayload,
+  type ProjectCurrentChangedPayload,
+  type ProjectDeletedPayload,
+  type ProjectUpdatedPayload,
+} from './definitions/projects.js'
+export {
+  NOTE_UPDATED_TYPE,
+  noteEventDefinitions,
+  noteUpdatedDefinition,
+  noteUpdatedPayloadSchema,
+  type NoteUpdatedPayload,
+} from './definitions/notes.js'
 export { getEventDefinition, isRegisteredType, listRegisteredTypes } from './registry.js'
 export {
   initialSettingsDraft,
@@ -80,9 +137,14 @@ export type {
   EventDefinition,
   EventDraft,
   NextAnchorMode,
-  ProjectedTemplate,
+  ProjectedDayNote,
+  ProjectedProject,
+  ProjectedTask,
   Projection,
   RecurrenceRule,
+  RecurrenceSpec,
   RecurrenceTemplate,
   RegisteredDefinition,
+  Step,
+  Task,
 } from './types.js'

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { DEFAULT_DAY_START_HOUR } from '@shared/time'
 import { openMigratedDatabase, type Db } from '../db/index.js'
 import { appendEvents, classifyMaintenance, readAccountEvents, rebuildProjection } from '../events/index.js'
-import { countProjectedTemplates, readProjection, writeProjection } from '../events/projection-store.js'
+import { countProjectedTasks, readProjection, writeProjection } from '../events/projection-store.js'
 import { project } from '../events/project.js'
 import { SETTINGS_UPDATED_TYPE } from '../events/definitions/settings.js'
 import { REVOKE_TYPE } from '../events/definitions/system.js'
@@ -23,9 +23,12 @@ import { testConfig } from './helpers.js'
  * 每个用例用**全新账号**，互不干扰——共用账号会让断言依赖执行顺序，
  * 而这类测试一旦顺序变了就会以「说不清哪里错」的形式红。
  *
- * 模板标识一律经 `tid(账号, 名字)` 生成，跨账号唯一。**注意那不是因为表要求全局唯一**：
- * ADR-011 §1 的主键是 `(account_id, id)`，两个账号持同一模板 id 是合法的导入形态
+ * 任务标识一律经 `tid(账号, 名字)` 生成，跨账号唯一。**注意那不是因为表要求全局唯一**：
+ * `tasks` 的主键是 `(account_id, id)`（ADR-013 §5），两个账号持同一任务 id 是合法的导入形态
  * （见「多账号隔离」组的回归用例）。用可读前缀只是为了让断言里的失败信息指得清是哪个账号。
+ *
+ * 本文件全部用 `task/created` 作为「会写投影表的事件」样本（ADR-013 §4.1）——
+ * 阶段 4 之前它是 `recurrence/template-created`，那四类事件已随 ADR-013 §4 移除。
  */
 
 let dir: string
@@ -61,7 +64,7 @@ function nextId(): string {
   return `${seq.toString(16).padStart(8, '0')}-0000-7000-8000-000000000000`
 }
 
-/** 模板标识：全局唯一（模拟真实 UUIDv7），但可读 */
+/** 任务标识：全局唯一（模拟真实 UUIDv7），但可读 */
 function tid(account: string, name: string): string {
   return `${account}:${name}`
 }
@@ -103,53 +106,55 @@ function countEvents(accountId: string): number {
   return row.n
 }
 
-function createdDraft(templateId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
+function createdDraft(taskId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
   return {
-    type: 'recurrence/template-created',
+    type: 'task/created',
     occurredAt: '2026-09-22T10:00:00+08:00',
-    targetKind: 'recurrence_template',
-    targetId: templateId,
+    targetKind: 'task',
+    targetId: taskId,
     payload: {
-      templateId,
+      taskId,
       title,
-      rule: { freq: 'daily', interval: 1 },
-      nextAnchorMode: 'catch_up',
-      startsOn: '2026-09-22',
+      notes: '',
+      importance: 'normal',
+      plannedDate: null,
+      plannedWeek: null,
+      dueDate: null,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      steps: [],
     },
     ...overrides,
   }
 }
 
-function updatedDraft(templateId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
+function updatedDraft(taskId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
   return {
-    type: 'recurrence/template-updated',
+    type: 'task/updated',
     occurredAt: '2026-09-23T10:00:00+08:00',
-    targetKind: 'recurrence_template',
-    targetId: templateId,
+    targetKind: 'task',
+    targetId: taskId,
     payload: {
-      templateId,
+      taskId,
       title,
-      rule: { freq: 'weekly', interval: 2, byDayOfWeek: [0] },
-      nextAnchorMode: 'extend',
-      startsOn: '2026-09-01',
+      notes: '',
+      importance: 'normal',
+      tags: [],
+      projectId: null,
+      recurrence: null,
     },
     ...overrides,
   }
 }
 
-function deletedDraft(templateId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
+function deletedDraft(taskId: string, overrides: Partial<EventDraft> = {}): EventDraft {
   return {
-    type: 'recurrence/template-deleted',
+    type: 'task/deleted',
     occurredAt: '2026-09-24T10:00:00+08:00',
-    targetKind: 'recurrence_template',
-    targetId: templateId,
-    payload: {
-      templateId,
-      title,
-      rule: { freq: 'daily', interval: 1 },
-      nextAnchorMode: 'catch_up',
-      startsOn: '2026-09-22',
-    },
+    targetKind: 'task',
+    targetId: taskId,
+    payload: { taskId },
     ...overrides,
   }
 }
@@ -163,6 +168,14 @@ function revokeDraft(targetBatchId: string, overrides: Partial<EventDraft> = {})
   }
 }
 
+/**
+ * 空投影（五键俱全，ADR-013 §5 / ADR-016 §6 / ADR-017 §6）。
+ *
+ * 写成**具名常量**而不是每处一个内联字面量：新增一个投影键时，
+ * 编译错误只出现在这里一处，而不是散落在若干条用例里。
+ */
+const EMPTY_PROJECTION = { tasks: [], projects: [], settings: null, days: [], dayNotes: [] }
+
 /** 该账号当前投影是否等于其全部事件的重放结果（ADR-010 §5 的核心不变式）。 */
 function expectProjectionMatchesReplay(accountId: string): void {
   expect(readProjection(db, accountId)).toEqual(project(readAccountEvents(db, accountId)))
@@ -174,7 +187,7 @@ describe('事件写入前的校验（ADR-010 §2）', () => {
     expect(() =>
       inTx(() =>
         appendEvents(db, account, [
-          { type: 'task/created', payload: {}, occurredAt: '2026-09-22T10:00:00+08:00' },
+          { type: 'task/archived', payload: {}, occurredAt: '2026-09-22T10:00:00+08:00' },
         ]),
       ),
     ).toThrow(/未登记的事件类型/)
@@ -186,11 +199,11 @@ describe('事件写入前的校验（ADR-010 §2）', () => {
     const good = createdDraft(tid(account, 'good'), '合法的一条')
     const bad: EventDraft = {
       ...createdDraft(tid(account, 'bad'), '非法的一条'),
-      payload: { templateId: 'x' },
+      payload: { taskId: 'x' },
     }
     expect(() => inTx(() => appendEvents(db, account, [good, bad]))).toThrow(/载荷不合法/)
     expect(countEvents(account)).toBe(0)
-    expect(countProjectedTemplates(db, account)).toBe(0)
+    expect(countProjectedTasks(db, account)).toBe(0)
   })
 
   it('id 必须是 UUIDv7', () => {
@@ -229,7 +242,7 @@ describe('事件写入前的校验（ADR-010 §2）', () => {
           {
             type: SETTINGS_UPDATED_TYPE,
             occurredAt: '2026-09-22T10:00:00+08:00',
-            targetKind: 'recurrence_template',
+            targetKind: 'task',
             payload: { timeZone: 'Asia/Shanghai', dayStartHour: 4 },
           },
         ]),
@@ -239,14 +252,14 @@ describe('事件写入前的校验（ADR-010 §2）', () => {
 
   it('声明了 target 的类型：两列由载荷派生，调用方不必给', () => {
     const account = freshAccount()
-    const templateId = tid(account, 't1')
+    const taskId = tid(account, 't1')
     const [event] = inTx(() =>
       appendEvents(db, account, [
-        createdDraft(templateId, '不带落点的一稿', { targetKind: undefined, targetId: undefined }),
+        createdDraft(taskId, '不带落点的一稿', { targetKind: undefined, targetId: undefined }),
       ]),
     )
-    expect(event!.targetKind).toBe('recurrence_template')
-    expect(event!.targetId).toBe(templateId)
+    expect(event!.targetKind).toBe('task')
+    expect(event!.targetId).toBe(taskId)
   })
 
   it('未登记 target 的类型写出的两列是 NULL', () => {
@@ -275,7 +288,7 @@ describe('事务纪律：一批次一事务（ADR-002 §1）', () => {
   it('投影写入同样必须在事务内', () => {
     const account = freshAccount()
     expect(() =>
-      writeProjection(db, account, { templates: [], settings: null, days: [] }),
+      writeProjection(db, account, EMPTY_PROJECTION),
     ).toThrow(/事务/)
   })
 
@@ -288,7 +301,7 @@ describe('事务纪律：一批次一事务（ADR-002 §1）', () => {
       }),
     ).toThrow('后续步骤失败')
     expect(countEvents(account)).toBe(0)
-    expect(countProjectedTemplates(db, account)).toBe(0)
+    expect(countProjectedTasks(db, account)).toBe(0)
   })
 })
 
@@ -426,7 +439,7 @@ describe('增量投影路径（ADR-010 §5）', () => {
     )
     expect(classifyMaintenance(db, account, inserted, first)).toBe('incremental')
     expectProjectionMatchesReplay(account)
-    expect(readProjection(db, account).templates.map((t) => t.title)).toEqual(['A', 'B'])
+    expect(readProjection(db, account).tasks.map((t) => t.title)).toEqual(['A', 'B'])
   })
 
   it('撤销事件触发全量重建：被撤销批次的模板从投影里消失', () => {
@@ -435,11 +448,11 @@ describe('增量投影路径（ADR-010 §5）', () => {
       appendEvents(db, account, [createdDraft(tid(account, 't1'), '将被撤销')]),
     )[0]!
     const kept = inTx(() => appendEvents(db, account, [createdDraft(tid(account, 't2'), '保留')]))[0]!
-    expect(readProjection(db, account).templates).toHaveLength(2)
+    expect(readProjection(db, account).tasks).toHaveLength(2)
 
     const revokeEvents = inTx(() => appendEvents(db, account, [revokeDraft(createdBatch.batchId)]))
     expect(classifyMaintenance(db, account, revokeEvents, kept.id)).toBe('rebuild')
-    expect(readProjection(db, account).templates.map((t) => t.title)).toEqual(['保留'])
+    expect(readProjection(db, account).tasks.map((t) => t.title)).toEqual(['保留'])
     expectProjectionMatchesReplay(account)
   })
 
@@ -457,7 +470,7 @@ describe('增量投影路径（ADR-010 §5）', () => {
       ]),
     )
     expect(classifyMaintenance(db, account, late, laterId)).toBe('rebuild')
-    expect(readProjection(db, account).templates.map((t) => t.title)).toEqual(['晚 id 的标题'])
+    expect(readProjection(db, account).tasks.map((t) => t.title)).toEqual(['晚 id 的标题'])
     expectProjectionMatchesReplay(account)
   })
 
@@ -469,7 +482,7 @@ describe('增量投影路径（ADR-010 §5）', () => {
       appendEvents(db, account, [createdDraft(tid(account, 't1'), '迟到的', { batchId: orphanBatch })]),
     )
     expect(classifyMaintenance(db, account, late, revokeEvent.id)).toBe('rebuild')
-    expect(readProjection(db, account).templates).toHaveLength(0)
+    expect(readProjection(db, account).tasks).toHaveLength(0)
     expectProjectionMatchesReplay(account)
   })
 
@@ -482,8 +495,12 @@ describe('增量投影路径（ADR-010 §5）', () => {
       ]),
     )
     inTx(() => appendEvents(db, account, [updatedDraft(tid(account, 't1'), '喝水（改）')]))
-    inTx(() => appendEvents(db, account, [deletedDraft(tid(account, 't2'), '复盘')]))
-    expect(readProjection(db, account).templates.map((t) => t.title)).toEqual(['喝水（改）'])
+    inTx(() => appendEvents(db, account, [deletedDraft(tid(account, 't2'))]))
+    // 软删除：行**保留**、只置 deletedAt（ADR-013 §4.8）——
+    // 与 ADR-011 §6 的模板删除（物理移除）不同，故这里两行都在。
+    const tasks = readProjection(db, account).tasks
+    expect(tasks.map((t) => t.title)).toEqual(['喝水（改）', '复盘'])
+    expect(tasks.map((t) => t.deletedAt === null)).toEqual([true, false])
     expectProjectionMatchesReplay(account)
 
     const incremental = readProjection(db, account)
@@ -497,21 +514,19 @@ describe('多账号隔离（ADR-010 §1 的复合主键）', () => {
     const alice = freshAccount()
     const bob = freshAccount()
     const sharedEventId = nextId()
-    // 用不写投影表的事件类型，使本用例只检验事件层的复合主键承诺
+    // 用**不写投影表**的事件类型（取消完成，ADR-013 §4.7 的 apply 是空操作），
+    // 使本用例只检验事件层的复合主键承诺。
     const draft: EventDraft = {
-      type: 'recurrence/round-completed',
+      type: 'task/occurrence-uncompleted',
       occurredAt: '2026-09-22T10:00:00+08:00',
       // 文件里的事件自带 id 与 batchId；不带的话每次追加都会新开批次，
       // 「导入两次 = 0 新增」就无从谈起（见上一组用例）。
       batchId: nextId(),
-      targetKind: 'recurrence_template',
+      targetKind: 'task',
       targetId: tid(alice, 't1'),
       payload: {
-        templateId: tid(alice, 't1'),
+        taskId: tid(alice, 't1'),
         originalPlannedDate: '2026-09-22',
-        completedDayKey: '2026-09-22',
-        nextAnchorDate: '2026-09-23',
-        nextAnchorMode: 'catch_up',
       },
     }
 
@@ -528,26 +543,26 @@ describe('多账号隔离（ADR-010 §1 的复合主键）', () => {
   })
 
   /**
-   * **回归防线**（ADR-011 §1 的复合主键）。
+   * **回归防线**（`tasks` 与 `events` 的复合主键，ADR-013 §5 / ADR-010 §1）。
    *
-   * 这条用例曾是**红的**：`recurrence_templates` 当时按 ADR-011 §1 原文写成
-   * `id TEXT PRIMARY KEY`（全局唯一），B 导入 A 导出的同一份模板时直接炸出
+   * 这条用例曾是**红的**：投影表当时按 ADR-011 §1 原文写成
+   * `id TEXT PRIMARY KEY`（全局唯一），B 导入 A 导出的同一份数据时直接炸出
    * `SqliteError: UNIQUE constraint failed: recurrence_templates.id`
    * （`writeProjection` → `maintainProjection` → `appendEvents`）。
-   * ADR-011 §1 已改为 `PRIMARY KEY (account_id, id)`——与 ADR-010 §1 给 `events`
+   * 已改为 `PRIMARY KEY (account_id, id)`——与 ADR-010 §1 给 `events`
    * 写下的理由逐字相同：导入是**账号范围内**的幂等，「同一份文件」在两个账号下
    * 各有一份副本是合法形态（ADR-005、FR3 的换机迁移）。
    *
    * 它现在必须**通过**；谁把主键改回全局唯一，这里第一个红。
    */
-  it('同一个模板 id 在两个账号下各有一份副本（模板表主键是 (account_id, id)）', () => {
+  it('同一个任务 id 在两个账号下各有一份副本（tasks 主键是 (account_id, id)）', () => {
     const alice = freshAccount()
     const bob = freshAccount()
-    // 同一份导出文件：同一个模板 id、同一条事件 id、同一个批次
-    const sharedTemplateId = 'aaaaaaaa-0000-7000-8000-000000000001'
+    // 同一份导出文件：同一个任务 id、同一条事件 id、同一个批次
+    const sharedTaskId = 'aaaaaaaa-0000-7000-8000-000000000001'
     const sharedEventId = nextId()
     const sharedBatchId = nextId()
-    const imported: EventDraft = createdDraft(sharedTemplateId, '导入的模板', {
+    const imported: EventDraft = createdDraft(sharedTaskId, '导入的任务', {
       id: sharedEventId,
       batchId: sharedBatchId,
     })
@@ -556,14 +571,14 @@ describe('多账号隔离（ADR-010 §1 的复合主键）', () => {
     expect(inTx(() => appendEvents(db, bob, [imported]))).toHaveLength(1)
 
     // 两份投影行各自落在自己的账号下，内容相同、互不覆盖
-    expect(readProjection(db, alice).templates.map((t) => [t.accountId, t.id, t.title])).toEqual([
-      [alice, sharedTemplateId, '导入的模板'],
+    expect(readProjection(db, alice).tasks.map((t) => [t.accountId, t.id, t.title])).toEqual([
+      [alice, sharedTaskId, '导入的任务'],
     ])
-    expect(readProjection(db, bob).templates.map((t) => [t.accountId, t.id, t.title])).toEqual([
-      [bob, sharedTemplateId, '导入的模板'],
+    expect(readProjection(db, bob).tasks.map((t) => [t.accountId, t.id, t.title])).toEqual([
+      [bob, sharedTaskId, '导入的任务'],
     ])
-    expect(countProjectedTemplates(db, alice)).toBe(1)
-    expect(countProjectedTemplates(db, bob)).toBe(1)
+    expect(countProjectedTasks(db, alice)).toBe(1)
+    expect(countProjectedTasks(db, bob)).toBe(1)
 
     // 两侧都仍满足「表 = 重放」（重建会各写一遍同 id 的行，不能互相踩）
     expectProjectionMatchesReplay(alice)
@@ -578,11 +593,11 @@ describe('多账号隔离（ADR-010 §1 的复合主键）', () => {
     const alice = freshAccount()
     const bob = freshAccount()
     inTx(() => appendEvents(db, alice, [createdDraft(tid(alice, 't1'), 'A 的')]))
-    expect(readProjection(db, bob).templates).toHaveLength(0)
+    expect(readProjection(db, bob).tasks).toHaveLength(0)
 
     inTx(() => appendEvents(db, bob, [createdDraft(tid(bob, 't1'), 'B 的')]))
-    expect(readProjection(db, alice).templates.map((t) => t.title)).toEqual(['A 的'])
-    expect(readProjection(db, bob).templates.map((t) => t.title)).toEqual(['B 的'])
+    expect(readProjection(db, alice).tasks.map((t) => t.title)).toEqual(['A 的'])
+    expect(readProjection(db, bob).tasks.map((t) => t.title)).toEqual(['B 的'])
   })
 
   it('读事件按账号过滤', () => {
@@ -682,7 +697,7 @@ describe('账号设置：settings/updated 是 settings 表的唯一来源（ADR-
     expect(before).not.toBeNull()
 
     // 绕过 rebuild，直接把各投影表都清空（模拟「投影被丢弃」）
-    inTx(() => writeProjection(db, account, { templates: [], settings: null, days: [] }))
+    inTx(() => writeProjection(db, account, EMPTY_PROJECTION))
     expect(readProjection(db, account).settings).toBeNull()
 
     rebuildProjection(db, account)

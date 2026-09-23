@@ -68,66 +68,70 @@ function inTx<T>(fn: () => T): T {
   return db.transaction(fn)()
 }
 
-/** 模板行的原始库内容——绕过内存对象直接比对，避免「对象相等但落库不同」。 */
-function rawTemplates(accountId: string): unknown[] {
+/** 任务行的原始库内容——绕过内存对象直接比对，避免「对象相等但落库不同」。 */
+function rawTasks(accountId: string): unknown[] {
   return db
     .prepare(
-      `SELECT id, account_id, title, rule_json, next_anchor_mode, starts_on, created_at, updated_at
-         FROM recurrence_templates WHERE account_id = ? ORDER BY id`,
+      `SELECT id, account_id, title, notes, importance, planned_date, planned_week, due_date,
+              tags_json, project_id, status, manual_order, steps_json, index_date,
+              recurrence_json, next_anchor_mode, starts_on, deleted_at, created_at, updated_at
+         FROM tasks WHERE account_id = ? ORDER BY id`,
     )
     .all(accountId)
 }
 
-function createdDraft(templateId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
+function createdDraft(taskId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
   return {
-    type: 'recurrence/template-created',
+    type: 'task/created',
     occurredAt: '2026-09-22T10:00:00+08:00',
-    targetKind: 'recurrence_template',
-    targetId: templateId,
+    targetKind: 'task',
+    targetId: taskId,
     batchId: nextId(),
     payload: {
-      templateId,
+      taskId,
       title,
-      rule: { freq: 'daily', interval: 1 },
-      nextAnchorMode: 'catch_up',
-      startsOn: '2026-09-22',
+      notes: '',
+      importance: 'normal',
+      plannedDate: null,
+      plannedWeek: null,
+      dueDate: null,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      steps: [],
     },
     ...overrides,
   }
 }
 
-function updatedDraft(templateId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
+function updatedDraft(taskId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
   return {
-    type: 'recurrence/template-updated',
+    type: 'task/updated',
     occurredAt: '2026-09-23T10:00:00+08:00',
-    targetKind: 'recurrence_template',
-    targetId: templateId,
+    targetKind: 'task',
+    targetId: taskId,
     batchId: nextId(),
     payload: {
-      templateId,
+      taskId,
       title,
-      rule: { freq: 'weekly', interval: 2, byDayOfWeek: [0, 4] },
-      nextAnchorMode: 'extend',
-      startsOn: '2026-09-01',
+      notes: '',
+      importance: 'normal',
+      tags: [],
+      projectId: null,
+      recurrence: null,
     },
     ...overrides,
   }
 }
 
-function deletedDraft(templateId: string, title: string, overrides: Partial<EventDraft> = {}): EventDraft {
+function deletedDraft(taskId: string, overrides: Partial<EventDraft> = {}): EventDraft {
   return {
-    type: 'recurrence/template-deleted',
+    type: 'task/deleted',
     occurredAt: '2026-09-24T10:00:00+08:00',
-    targetKind: 'recurrence_template',
-    targetId: templateId,
+    targetKind: 'task',
+    targetId: taskId,
     batchId: nextId(),
-    payload: {
-      templateId,
-      title,
-      rule: { freq: 'daily', interval: 1 },
-      nextAnchorMode: 'catch_up',
-      startsOn: '2026-09-22',
-    },
+    payload: { taskId },
     ...overrides,
   }
 }
@@ -151,12 +155,14 @@ describe('重建是安全网，不是理论存在（ADR-002 §2 / ADR-010 §5）
       ]),
     )
     inTx(() => appendEvents(db, account, [updatedDraft(tid(account, 't1'), '喝水（改）')]))
-    inTx(() => appendEvents(db, account, [deletedDraft(tid(account, 't2'), '复盘')]))
-    const before = rawTemplates(account)
-    expect(before).toHaveLength(1)
+    inTx(() => appendEvents(db, account, [deletedDraft(tid(account, 't2'))]))
+    const before = rawTasks(account)
+    // **软删除的行仍在**（ADR-013 §4.8）：删除不是「从表里消失」，而是一个列被置位。
+    // 故这里是 2 行，且重建之后逐字段一致（包括那一列的取值）。
+    expect(before).toHaveLength(2)
 
     rebuildProjection(db, account)
-    expect(rawTemplates(account)).toEqual(before)
+    expect(rawTasks(account)).toEqual(before)
   })
 
   it('重建结果 == project() 的结果（表与纯函数两条路径同源）', () => {
@@ -174,16 +180,22 @@ describe('重建是安全网，不是理论存在（ADR-002 §2 / ADR-010 §5）
   it('空流水重建 = 空投影（不是错误）', () => {
     const account = freshAccount()
     rebuildProjection(db, account)
-    expect(readProjection(db, account)).toEqual({ templates: [], settings: null, days: [] })
+    expect(readProjection(db, account)).toEqual({
+      tasks: [],
+      projects: [],
+      settings: null,
+      days: [],
+      dayNotes: [],
+    })
   })
 
   it('连跑两次结果不变（重建是幂等的）', () => {
     const account = freshAccount()
     inTx(() => appendEvents(db, account, [createdDraft(tid(account, 't1'), 'A')]))
     rebuildProjection(db, account)
-    const first = rawTemplates(account)
+    const first = rawTasks(account)
     rebuildProjection(db, account)
-    expect(rawTemplates(account)).toEqual(first)
+    expect(rawTasks(account)).toEqual(first)
   })
 
   it('可以在已开启的事务内调用（增量兜底就是这种用法）', () => {
@@ -191,7 +203,7 @@ describe('重建是安全网，不是理论存在（ADR-002 §2 / ADR-010 §5）
     inTx(() => appendEvents(db, account, [createdDraft(tid(account, 't1'), 'A')]))
     inTx(() => {
       rebuildProjection(db, account)
-      expect(readProjection(db, account).templates).toHaveLength(1)
+      expect(readProjection(db, account).tasks).toHaveLength(1)
     })
   })
 })
@@ -202,44 +214,61 @@ describe('投影表里没有不可重放的东西（ADR-002 §2 硬约束）', (
     inTx(() => appendEvents(db, account, [createdDraft(tid(account, 't1'), '真实存在')]))
     // 模拟「某个模块绕过事件追加，自己往投影表里插了一行」
     db.prepare(
-      `INSERT INTO recurrence_templates
-         (id, account_id, title, rule_json, next_anchor_mode, starts_on, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks
+         (id, account_id, title, notes, importance, planned_date, planned_week, due_date,
+          tags_json, project_id, status, manual_order, steps_json, index_date,
+          recurrence_json, next_anchor_mode, starts_on, deleted_at, created_at, updated_at)
+       VALUES (?, ?, ?, '', 'normal', NULL, NULL, NULL,
+               '[]', NULL, 'not_started', NULL, '[]', '2026-09-22',
+               NULL, NULL, NULL, NULL, ?, ?)`,
     ).run(
       tid(account, 'ghost'),
       account,
       '没有创建事件的行',
-      JSON.stringify({ freq: 'daily', interval: 1 }),
-      'catch_up',
-      '2026-09-22',
       '2026-09-22T10:00:00+08:00',
       '2026-09-22T10:00:00+08:00',
     )
-    expect(rawTemplates(account)).toHaveLength(2)
+    expect(rawTasks(account)).toHaveLength(2)
 
     rebuildProjection(db, account)
     // 只剩重放得出的那一行：表内容 = 事件的函数
-    expect(rawTemplates(account).map((row) => (row as { id: string }).id)).toEqual([
+    expect(rawTasks(account).map((row) => (row as { id: string }).id)).toEqual([
       tid(account, 't1'),
     ])
   })
 
   it('表的列集合就是「事件能重放出的那几项」，没有多余列', () => {
     const columns = (
-      db.prepare(`PRAGMA table_info(recurrence_templates)`).all() as { name: string }[]
+      db.prepare(`PRAGMA table_info(tasks)`).all() as { name: string }[]
     ).map((column) => column.name)
     expect(columns.sort()).toEqual(
       [
         'account_id',
         'created_at',
+        'deleted_at',
+        'due_date',
         'id',
+        'importance',
+        'index_date',
+        'manual_order',
         'next_anchor_mode',
-        'rule_json',
+        'notes',
+        'planned_date',
+        'planned_week',
+        'project_id',
+        'recurrence_json',
         'starts_on',
+        'status',
+        'steps_json',
+        'tags_json',
         'title',
         'updated_at',
       ].sort(),
     )
+    // **没有 carry_count 列**：顺延次数是派生量（`task/rescheduled` 事件的条数），
+    // 落库就得在撤销时额外维护它，多一个会与事件分叉的地方（ADR-002 §2 / ADR-013 §4.3）。
+    // 这条断言是「不落库」的结构性回归——谁把它加回去，这里第一个红。
+    expect(columns).not.toContain('carry_count')
   })
 
   it('重建不碰 events 表：事件是不可变的（ADR-001 地基）', () => {
@@ -260,7 +289,7 @@ describe('投影表里没有不可重放的东西（ADR-002 §2 硬约束）', (
  * 而不是追加一条 revoke 去撤销那条 revoke——那条路通向无穷递归（ADR-006「约束」）。
  */
 describe('边界事件之后的重建（ADR-004 / ADR-006 的库侧验证）', () => {
-  it('被撤销批次的模板在重建后消失，其余保留', () => {
+  it('被撤销批次的任务在重建后消失，其余保留', () => {
     const account = freshAccount()
     const doomed = inTx(() =>
       appendEvents(db, account, [createdDraft(tid(account, 't1'), '将被撤销')]),
@@ -269,7 +298,7 @@ describe('边界事件之后的重建（ADR-004 / ADR-006 的库侧验证）', (
     inTx(() => appendEvents(db, account, [revokeDraft(doomed.batchId)]))
 
     rebuildProjection(db, account)
-    expect(readProjection(db, account).templates.map((t) => t.title)).toEqual(['保留'])
+    expect(readProjection(db, account).tasks.map((t) => t.title)).toEqual(['保留'])
     // 被撤销的事件仍在事件表里（撤销是「不参与折叠」，不是删除）
     expect(readAccountEvents(db, account)).toHaveLength(3)
   })
@@ -285,7 +314,7 @@ describe('边界事件之后的重建（ADR-004 / ADR-006 的库侧验证）', (
     inTx(() => appendEvents(db, account, [revokeDraft(revokeEvent.batchId)]))
 
     rebuildProjection(db, account)
-    expect(readProjection(db, account).templates).toHaveLength(0)
+    expect(readProjection(db, account).tasks).toHaveLength(0)
   })
 
   it('覆盖锚点之前的事件不参与折叠，但物理保留', () => {
@@ -302,7 +331,7 @@ describe('边界事件之后的重建（ADR-004 / ADR-006 的库侧验证）', (
     )
 
     rebuildProjection(db, account)
-    expect(readProjection(db, account).templates).toHaveLength(0)
+    expect(readProjection(db, account).tasks).toHaveLength(0)
     expect(readAccountEvents(db, account)).toHaveLength(2)
   })
 })
@@ -311,7 +340,7 @@ describe('重建的事务性与作用域', () => {
   it('重放中途抛错时投影表原样保留（事务回滚，不会留下「清空后未写回」的空表）', () => {
     const account = freshAccount()
     inTx(() => appendEvents(db, account, [createdDraft(tid(account, 't1'), '好数据')]))
-    const before = rawTemplates(account)
+    const before = rawTasks(account)
 
     // 塞一条未登记类型的事件：它无法重放，project() 会抛错
     db.prepare(
@@ -322,7 +351,7 @@ describe('重建的事务性与作用域', () => {
     ).run(
       nextId(),
       account,
-      'task/created',
+      'task/archived',
       '2026-09-23T10:00:00+08:00',
       'Asia/Shanghai',
       '2026-09-23',
@@ -334,7 +363,7 @@ describe('重建的事务性与作用域', () => {
 
     expect(() => rebuildProjection(db, account)).toThrow(/未登记的事件类型/)
     // 关键：不是「空表」，而是**一点没动**——clearProjection 也一并回滚了
-    expect(rawTemplates(account)).toEqual(before)
+    expect(rawTasks(account)).toEqual(before)
   })
 
   it('只重建指定账号，另一个账号的投影行分毫不动', () => {
@@ -347,14 +376,14 @@ describe('重建的事务性与作用域', () => {
       ]),
     )
     inTx(() => appendEvents(db, bob, [createdDraft(tid(bob, 't1'), 'B 的')]))
-    const bobBefore = rawTemplates(bob)
+    const bobBefore = rawTasks(bob)
 
     rebuildProjection(db, alice)
-    expect(rawTemplates(bob)).toEqual(bobBefore)
-    expect(readProjection(db, alice).templates).toHaveLength(2)
+    expect(rawTasks(bob)).toEqual(bobBefore)
+    expect(readProjection(db, alice).tasks).toHaveLength(2)
   })
 
-  it('删掉创建事件所在批次后重建，别账号的同名模板不受影响', () => {
+  it('删掉创建事件所在批次后重建，别账号的同名任务不受影响', () => {
     const alice = freshAccount()
     const bob = freshAccount()
     const aliceBatch = inTx(() =>
@@ -364,17 +393,17 @@ describe('重建的事务性与作用域', () => {
     inTx(() => appendEvents(db, alice, [revokeDraft(aliceBatch.batchId)]))
 
     rebuildProjection(db, alice)
-    expect(readProjection(db, alice).templates).toHaveLength(0)
-    expect(readProjection(db, bob).templates.map((t) => t.title)).toEqual(['B 的'])
+    expect(readProjection(db, alice).tasks).toHaveLength(0)
+    expect(readProjection(db, bob).tasks.map((t) => t.title)).toEqual(['B 的'])
   })
 })
 
 /**
- * `settings` 与模板同为投影：**可丢弃、可重建**（ADR-010 §6/§7）。
+ * `settings` 与任务同为投影：**可丢弃、可重建**（ADR-010 §6/§7）。
  *
  * 本组原先有两条「重建不清空 settings」的用例，理由是「阶段 2 没有任何事件能把它
  * 建回来」。`settings/updated` 登记后那个理由消失，两条用例随之**反过来**：
- * 现在清空重建必须得到同一行——与模板走同一条不变式。
+ * 现在清空重建必须得到同一行——与任务走同一条不变式。
  */
 describe('settings 也是投影：重建会从事件把它建回来（ADR-010 §6/§7）', () => {
   function rawSettings(accountId: string): unknown {
@@ -403,7 +432,7 @@ describe('settings 也是投影：重建会从事件把它建回来（ADR-010 §
     expect(rawSettings(account)).toEqual(before)
   })
 
-  it('手工塞进去、没有事件依据的 settings 行会被重建抹掉（与模板同一条纪律）', () => {
+  it('手工塞进去、没有事件依据的 settings 行会被重建抹掉（与任务同一条纪律）', () => {
     const account = freshAccount()
     // 模拟「某个模块绕过事件追加，自己往设置表里插了一行」（ADR-010 §7 的违规路径）
     db.prepare(
@@ -431,7 +460,7 @@ describe('settings 也是投影：重建会从事件把它建回来（ADR-010 §
 
     rebuildProjection(db, account)
     const event = readAccountEvents(db, account).find(
-      (candidate) => candidate.type === 'recurrence/template-created',
+      (candidate) => candidate.type === 'task/created',
     )!
     expect(event.dayKey).toBe('2026-09-21')
     expect(event.dayStartHour).toBe(4)

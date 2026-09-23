@@ -17,10 +17,16 @@ import type { Event, Projection } from './types.js'
  *   3. **折叠**：跳过被撤销批次内的事件，逐条调用其 `EventDefinition.apply`。
  */
 export function project(events: readonly Event[]): Projection {
-  // 空流水的投影 = 「什么都没发生过」：模板为空，设置**未设置**（null，不是默认值），
-  // 打卡日为空（无行 = 无到达 = 休息日，ADR-012 §2/§5）。
+  // 空流水的投影 = 「什么都没发生过」：任务为空，设置**未设置**（null，不是默认值），
+  // 打卡日为空（无行 = 无到达 = 休息日，ADR-012 §2/§5），项目与每日备注为空。
   // 默认值属于读取方的回落策略，`project()` 若在这里填默认值就得读服务端时区。
-  const projection: Projection = { templates: [], settings: null, days: [] }
+  const projection: Projection = {
+    tasks: [],
+    projects: [],
+    settings: null,
+    days: [],
+    dayNotes: [],
+  }
   if (events.length === 0) return projection
 
   assertSingleAccount(events)
@@ -66,21 +72,38 @@ export function project(events: readonly Event[]): Projection {
 }
 
 /**
- * 把投影的数组顺序规范化：模板按 **id 升序**、打卡日按 **dayKey 升序**。
+ * 把投影的数组顺序规范化 —— **排序键写死在 ADR-013 §5 的那张表里，不留给实现者**：
  *
- * 折叠顺序是「事件 id」序，删除会让数组出现空位、更新会原地替换，
- * 于是同一份状态可以有多种数组顺序。若不规范化，「增量维护」与「全量重建」
- * 两条路径产出的对象会在顺序上不同，ADR-010 §5 要求的「两者结果必须一致」
- * 就无法逐字段断言（只能比较排序后的副本，等于把不变式测松了）。
+ * | 投影数组 | 排序键 |
+ * |---|---|
+ * | `tasks` | `id` 升序 |
+ * | `projects` | `id` 升序 |
+ * | `days` | `dayKey` 升序 |
+ * | `dayNotes` | `dayKey` 升序 |
+ *
+ * 折叠顺序是「事件 id」序，而任务会被原地更新、软删除、撤销批次改写——它与任务 id 序
+ * **天然不同**。两条路径若不按同一个键规范化，产出的数组顺序就不一致，
+ * ADR-010 §5 要求的「增量维护结果 == 全量重建结果」那条断言**必然 flaky**，
+ * 而 flaky 的断言会被当成测试问题而不是设计问题。
+ *
+ * `id` 的字符串比较前提见 ADR-001「约束」：规范 UUIDv7、小写、**定长 36**
+ * ⇒ **字典序 === 时间序**。
  *
  * 打卡日按 `dayKey` 升序还有第二个用途：ADR-012 §6 要求 `shared/checkin` 的入参
  * `dayKeys`「已升序、已去重」，而投影是它唯一被保证的来源（§3 的 `/days` 也返回升序）。
  * 比较走 `@shared/time` 的 `compareDayKey`——**不引入本层自己的日期比较**
  * （§约束「所有归属日折算经 shared/time」）。
+ *
+ * **嵌套的 `steps` 不单独排序**（ADR-013 §5）：它的顺序是 `apply` 维护的**数组顺序**本身
+ * （`step-added` 追加到末尾、`step-removed` 原位删除、`steps-reordered` 整体替换）。
+ * 它是事件顺序的确定性函数，故无需额外规范化——**但这也意味着 `steps-reordered` 的
+ * `order` 载荷必须是完整列表**（§4.13）。
  */
 export function canonicalizeProjection(projection: Projection): void {
-  projection.templates.sort((a, b) => compareIds(a.id, b.id))
+  projection.tasks.sort((a, b) => compareIds(a.id, b.id))
+  projection.projects.sort((a, b) => compareIds(a.id, b.id))
   projection.days.sort((a, b) => compareDayKey(a.dayKey, b.dayKey))
+  projection.dayNotes.sort((a, b) => compareDayKey(a.dayKey, b.dayKey))
 }
 
 /**
@@ -101,7 +124,7 @@ function compareIds(a: string, b: string): number {
 /**
  * 单账号不变量：`project()` 的边界（「该账号最后一条锚点」）以**一个账号**为前提。
  * 混入第二个账号的事件会静默产出跨账号合并的状态，而投影表是按账号写的——
- * 那样会把 B 的模板写进 A 的行里。宁可当场抛错。
+ * 那样会把 B 的任务写进 A 的行里。宁可当场抛错。
  */
 function assertSingleAccount(events: readonly Event[]): void {
   const first = events[0]!.accountId

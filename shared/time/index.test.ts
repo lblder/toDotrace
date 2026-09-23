@@ -20,6 +20,7 @@ import {
   daysInMonthOf,
   diffDays,
   formatDayKey,
+  formatWeek,
   isDayKey,
   makeDayKey,
   parseDayKey,
@@ -613,6 +614,36 @@ describe('formatDayKey', () => {
   it('非法 DayKey 与非法 style 一律拒绝，不在组件里静默拼字符串', () => {
     expect(() => formatDayKey('2026-9-21')).toThrow(RangeError)
     expect(() => formatDayKey('2026-09-21', 'medium' as 'short')).toThrow(RangeError)
+  })
+})
+
+// ADR-009 §10（v1.3 补）：周粒度的呈现
+describe('formatWeek', () => {
+  it('入参是「该周内任意一天」，七天取值全部相同（内部规范化的回归）', () => {
+    // 2026-09-28 是周一；逐一取到周日，全部应得同一个串
+    const week = ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04']
+    const rendered = week.map((dk) => formatWeek(dk))
+    expect(new Set(rendered).size).toBe(1)
+    expect(rendered[0]).toBe('9月28日那一周')
+  })
+
+  it('跨月：以该周周一呈现，不随落在哪一天而变', () => {
+    expect(formatWeek('2026-10-01')).toBe('9月28日那一周')
+  })
+
+  it('跨年', () => {
+    expect(formatWeek('2026-12-28')).toBe('12月28日那一周')
+    expect(formatWeek('2027-01-01')).toBe('12月28日那一周')
+  })
+
+  it('不随宿主 locale 变化（与 §6 的 formatDayKey 同款断言）', () => {
+    // 措辞是契约：它在预览、周视图标题、项目分组标题里出现
+    expect(formatWeek('2026-09-28')).toContain('那一周')
+  })
+
+  it('非法 DayKey 一律拒绝', () => {
+    expect(() => formatWeek('2026-9-28')).toThrow(RangeError)
+    expect(() => formatWeek('2026-02-30')).toThrow(RangeError)
   })
 })
 

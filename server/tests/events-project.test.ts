@@ -36,37 +36,63 @@ function event(overrides: Partial<Event> & Pick<Event, 'id' | 'type' | 'batchId'
   }
 }
 
-function templateCreated(batchId: string, templateId: string, title: string, id = nextId()): Event {
+function taskCreated(batchId: string, taskId: string, title: string, id = nextId()): Event {
   return event({
     id,
-    type: 'recurrence/template-created',
+    type: 'task/created',
     batchId,
-    targetKind: 'recurrence_template',
-    targetId: templateId,
+    targetKind: 'task',
+    targetId: taskId,
     payload: {
-      templateId,
+      taskId,
       title,
-      rule: { freq: 'daily', interval: 1 },
-      nextAnchorMode: 'catch_up',
-      startsOn: '2026-09-22',
+      notes: '',
+      importance: 'normal',
+      plannedDate: null,
+      plannedWeek: null,
+      dueDate: null,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      steps: [],
     },
   })
 }
 
-function templateUpdated(batchId: string, templateId: string, title: string, id = nextId()): Event {
+function taskUpdated(batchId: string, taskId: string, title: string, id = nextId()): Event {
   return event({
     id,
-    type: 'recurrence/template-updated',
+    type: 'task/updated',
     batchId,
-    targetKind: 'recurrence_template',
-    targetId: templateId,
+    targetKind: 'task',
+    targetId: taskId,
     payload: {
-      templateId,
+      taskId,
       title,
-      rule: { freq: 'weekly', interval: 2 },
-      nextAnchorMode: 'extend',
-      startsOn: '2026-09-01',
+      notes: '',
+      importance: 'normal',
+      tags: [],
+      projectId: null,
+      recurrence: null,
     },
+  })
+}
+
+function projectChanged(batchId: string, projectId: string | null, id = nextId()): Event {
+  return event({
+    id,
+    type: 'project/current-changed',
+    batchId,
+    payload: { projectId },
+  })
+}
+
+function noteUpdated(batchId: string, dayKey: string, text: string, id = nextId()): Event {
+  return event({
+    id,
+    type: 'note/updated',
+    batchId,
+    payload: { dayKey, text },
   })
 }
 
@@ -103,24 +129,24 @@ function settingsUpdated(
 }
 
 function titles(projection: Projection): string[] {
-  return projection.templates.map((template) => template.title)
+  return projection.tasks.map((task) => task.title)
 }
 
 describe('project() 是纯函数（ADR-010 §4 硬约束）', () => {
   it('同一流水两次重放结果逐字段一致', () => {
     const events = [
-      templateCreated('b1', 't1', '每天喝水'),
-      templateCreated('b1', 't2', '每周复盘'),
-      templateUpdated('b2', 't1', '每天喝八杯水'),
+      taskCreated('b1', 't1', '每天喝水'),
+      taskCreated('b1', 't2', '每周复盘'),
+      taskUpdated('b2', 't1', '每天喝八杯水'),
     ]
     expect(project(events)).toEqual(project(events))
   })
 
   it('输入顺序无关（同一份事件集必得同一状态）', () => {
     const events = [
-      templateCreated('b1', 't1', 'A'),
-      templateCreated('b1', 't2', 'B'),
-      templateUpdated('b2', 't1', 'A2'),
+      taskCreated('b1', 't1', 'A'),
+      taskCreated('b1', 't2', 'B'),
+      taskUpdated('b2', 't1', 'A2'),
       revoke('b3', 'b1'),
     ]
     const forward = project(events)
@@ -132,8 +158,8 @@ describe('project() 是纯函数（ADR-010 §4 硬约束）', () => {
 
   it('不修改入参：冻结的数组与事件对象也能重放', () => {
     const events = Object.freeze([
-      Object.freeze(templateCreated('b1', 't1', 'A')),
-      Object.freeze(templateCreated('b1', 't2', 'B')),
+      Object.freeze(taskCreated('b1', 't1', 'A')),
+      Object.freeze(taskCreated('b1', 't2', 'B')),
     ])
     expect(() => project(events)).not.toThrow()
     expect(titles(project(events))).toEqual(['A', 'B'])
@@ -142,7 +168,7 @@ describe('project() 是纯函数（ADR-010 §4 硬约束）', () => {
   it('不读时钟：系统时间相差一年，结果相同', () => {
     vi.useFakeTimers()
     try {
-      const events = [templateCreated('b1', 't1', 'A')]
+      const events = [taskCreated('b1', 't1', 'A')]
       vi.setSystemTime(new Date('2020-01-01T00:00:00Z'))
       const first = project(events)
       vi.setSystemTime(new Date('2021-06-15T12:34:56Z'))
@@ -156,7 +182,7 @@ describe('project() 是纯函数（ADR-010 §4 硬约束）', () => {
   it('不读时钟：重放过程一次都没有调用 Date.now()', () => {
     const spy = vi.spyOn(Date, 'now')
     try {
-      project([templateCreated('b1', 't1', 'A'), anchor('b2')])
+      project([taskCreated('b1', 't1', 'A'), anchor('b2')])
       expect(spy).not.toHaveBeenCalled()
     } finally {
       spy.mockRestore()
@@ -167,7 +193,13 @@ describe('project() 是纯函数（ADR-010 §4 硬约束）', () => {
     // 填默认值就得读服务端时区（`serverTimeZone()`），`project()` 当场不再是纯函数。
     // 「缺设置时用哪个时区」属于读取方（`loadAccountSettings`）的回落策略。
     // 打卡日同理：空流水 = 一行都没有 = 每天都是休息日（ADR-012 §2/§5）。
-    expect(project([])).toEqual({ templates: [], settings: null, days: [] })
+    expect(project([])).toEqual({
+      tasks: [],
+      projects: [],
+      settings: null,
+      days: [],
+      dayNotes: [],
+    })
   })
 })
 
@@ -183,7 +215,7 @@ describe('设置投影（ADR-010 §3 的 Projection.settings）', () => {
   })
 
   it('没有设置事件时是 null（不编造）', () => {
-    const created = templateCreated('b1', 't1', 'A')
+    const created = taskCreated('b1', 't1', 'A')
     expect(project([created]).settings).toBeNull()
   })
 
@@ -222,16 +254,16 @@ describe('设置投影（ADR-010 §3 的 Projection.settings）', () => {
 
 describe('排序键唯一地是 id（ADR-001 §2）', () => {
   it('同一模板的两次更新，id 大者胜出——与数组顺序、批次顺序无关', () => {
-    const created = templateCreated('b1', 't1', '原名')
-    const earlier = templateUpdated('b2', 't1', '早的更新')
-    const later = templateUpdated('b9', 't1', '晚的更新')
+    const created = taskCreated('b1', 't1', '原名')
+    const earlier = taskUpdated('b2', 't1', '早的更新')
+    const later = taskUpdated('b9', 't1', '晚的更新')
     expect(titles(project([created, later, earlier]))).toEqual(['晚的更新'])
     expect(titles(project([later, created, earlier]))).toEqual(['晚的更新'])
   })
 
   it('batch_id 不参与排序：批次标识逆序也得到同一结果', () => {
-    const created = templateCreated('b-zzzz', 't1', '原名')
-    const update = templateUpdated('b-aaaa', 't1', '更新后')
+    const created = taskCreated('b-zzzz', 't1', '原名')
+    const update = taskUpdated('b-aaaa', 't1', '更新后')
     expect(titles(project([created, update]))).toEqual(['更新后'])
   })
 })
@@ -248,18 +280,18 @@ describe('排序键唯一地是 id（ADR-001 §2）', () => {
  */
 describe('第 1 步：覆盖面（ADR-004 / ADR-010 §4）', () => {
   it('只折叠最后一条锚点之后的事件，锚点自身也不参与折叠', () => {
-    const before = templateCreated('b1', 't1', '锚点前')
+    const before = taskCreated('b1', 't1', '锚点前')
     const anchorEvent = anchor('b2')
-    const after = templateCreated('b2', 't2', '锚点后')
+    const after = taskCreated('b2', 't2', '锚点后')
     expect(titles(project([before, anchorEvent, after]))).toEqual(['锚点后'])
   })
 
   it('多条锚点时取 id 最大的那条，而不是数组里的最后一条', () => {
-    const first = templateCreated('b1', 't1', '第一纪元')
+    const first = taskCreated('b1', 't1', '第一纪元')
     const anchor1 = anchor('b2')
-    const second = templateCreated('b3', 't2', '第二纪元')
+    const second = taskCreated('b3', 't2', '第二纪元')
     const anchor2 = anchor('b4')
-    const third = templateCreated('b5', 't3', '第三纪元')
+    const third = taskCreated('b5', 't3', '第三纪元')
 
     // 顺序打乱：anchor1 排在数组最后，但 id 小于 anchor2
     const projection = project([first, second, anchor2, third, anchor1])
@@ -267,7 +299,7 @@ describe('第 1 步：覆盖面（ADR-004 / ADR-010 §4）', () => {
   })
 
   it('锚点之前的事件物理保留在输入里（只是不参与折叠）', () => {
-    const before = templateCreated('b1', 't1', '锚点前')
+    const before = taskCreated('b1', 't1', '锚点前')
     const events = [before, anchor('b2')]
     expect(events).toHaveLength(2)
     expect(titles(project(events))).toEqual([])
@@ -276,40 +308,46 @@ describe('第 1 步：覆盖面（ADR-004 / ADR-010 §4）', () => {
 
 describe('第 1 步：撤销（ADR-006 / ADR-010 §4）', () => {
   it('被撤销批次内的事件被跳过', () => {
-    const created = templateCreated('b1', 't1', '将被撤销')
-    const kept = templateCreated('b2', 't2', '保留')
+    const created = taskCreated('b1', 't1', '将被撤销')
+    const kept = taskCreated('b2', 't2', '保留')
     const revokeEvent = revoke('b3', 'b1')
     expect(titles(project([created, kept, revokeEvent]))).toEqual(['保留'])
   })
 
   it('撤销事件本身不可被撤销：指向撤销所在批次的 revoke 无效', () => {
-    const created = templateCreated('b-x', 't1', '目标')
+    const created = taskCreated('b-x', 't1', '目标')
     const revokeX = revoke('b-r', 'b-x')
     const revokeR = revoke('b-q', 'b-r') // 试图撤销「撤销 b-x」这件事
     expect(titles(project([created, revokeX, revokeR]))).toEqual([])
   })
 
   it('revoke 不参与撤销集合的构建：自指不会无限递归，且被它指向的批次仍被跳过', () => {
-    const created = templateCreated('b-self', 't1', '同批次')
+    const created = taskCreated('b-self', 't1', '同批次')
     const selfRevoke = revoke('b-self', 'b-self')
     expect(titles(project([created, selfRevoke]))).toEqual([])
   })
 
   it('指向不存在批次的 revoke 是无害的空操作', () => {
-    const created = templateCreated('b1', 't1', '保留')
+    const created = taskCreated('b1', 't1', '保留')
     expect(titles(project([created, revoke('b2', 'no-such-batch')]))).toEqual(['保留'])
   })
 
   it('revoke 的 apply 是空操作：撤销本身不产生投影行', () => {
-    const created = templateCreated('b1', 't1', 'A')
-    expect(project([created, revoke('b2', 'b1')]).templates).toHaveLength(0)
+    const created = taskCreated('b1', 't1', 'A')
+    expect(project([created, revoke('b2', 'b1')]).tasks).toHaveLength(0)
   })
 })
 
 describe('系统事件（ADR-010 §7）', () => {
   it('两类系统事件都不写投影表', () => {
     const events = [anchor('b1'), revoke('b2', 'b3')]
-    expect(project(events)).toEqual({ templates: [], settings: null, days: [] })
+    expect(project(events)).toEqual({
+      tasks: [],
+      projects: [],
+      settings: null,
+      days: [],
+      dayNotes: [],
+    })
   })
 
   it('系统事件已登记（否则 §2 的「未登记拒绝写入」与 §4 的边界扫描会互相打死）', () => {
@@ -320,21 +358,60 @@ describe('系统事件（ADR-010 §7）', () => {
 
 describe('未登记类型与跨账号输入', () => {
   it('未登记的类型在重放时抛错（它无法被重放）', () => {
-    const alien = event({ id: nextId(), type: 'task/created', batchId: 'b1' })
+    const alien = event({ id: nextId(), type: 'task/archived', batchId: 'b1' })
     expect(() => project([alien])).toThrow(/未登记的事件类型/)
   })
 
   it('混入第二个账号的事件时抛错，而不是静默产出跨账号状态', () => {
-    const mine = templateCreated('b1', 't1', 'A')
-    const theirs = { ...templateCreated('b2', 't2', 'B'), accountId: OTHER_ACCOUNT }
+    const mine = taskCreated('b1', 't1', 'A')
+    const theirs = { ...taskCreated('b2', 't2', 'B'), accountId: OTHER_ACCOUNT }
     expect(() => project([mine, theirs])).toThrow(/单个账号/)
   })
 })
 
-describe('模板数组的规范化顺序', () => {
-  it('无论折叠顺序如何，templates 一律按模板 id 升序（增量与全量才可逐字段比对）', () => {
-    const first = templateCreated('b1', 't-zzz', '后创建的')
-    const second = templateCreated('b1', 't-aaa', '先创建的')
-    expect(project([first, second]).templates.map((t) => t.id)).toEqual(['t-aaa', 't-zzz'])
+describe('投影数组的规范化顺序（ADR-013 §5 的排序键表）', () => {
+  it('无论折叠顺序如何，tasks 一律按任务 id 升序（增量与全量才可逐字段比对）', () => {
+    const first = taskCreated('b1', 't-zzz', '后创建的')
+    const second = taskCreated('b1', 't-aaa', '先创建的')
+    expect(project([first, second]).tasks.map((t) => t.id)).toEqual(['t-aaa', 't-zzz'])
+  })
+
+  it('projects / dayNotes 各按 id / dayKey 升序——项目与备注同样要规范化', () => {
+    const late = event({
+      id: nextId(),
+      type: 'project/created',
+      batchId: 'b1',
+      payload: { projectId: 'p-zzz', name: 'Z', startsOn: '2026-09-01', endsOn: '2026-09-30' },
+    })
+    const early = event({
+      id: nextId(),
+      type: 'project/created',
+      batchId: 'b1',
+      payload: { projectId: 'p-aaa', name: 'A', startsOn: '2026-09-01', endsOn: '2026-09-30' },
+    })
+    expect(project([late, early]).projects.map((p) => p.id)).toEqual(['p-aaa', 'p-zzz'])
+
+    const dayLater = noteUpdated('b1', '2026-09-22', '后一天')
+    const dayEarlier = noteUpdated('b1', '2026-09-01', '前一天')
+    expect(project([dayLater, dayEarlier]).dayNotes.map((n) => n.dayKey)).toEqual([
+      '2026-09-01',
+      '2026-09-22',
+    ])
+  })
+})
+
+describe('项目与每日备注的折叠（ADR-016 §5、ADR-017 §6）', () => {
+  it('project/current-changed 的 projectId: null 能重放（这是它不声明 target 的原因）', () => {
+    const projection = project([projectChanged('b1', null)])
+    expect(projection.projects.every((p) => !p.isCurrent)).toBe(true)
+  })
+
+  it('note/updated 的 text 为空串即清除该行（不引入 null）', () => {
+    const written = project([noteUpdated('b1', '2026-09-22', '发烧在家')])
+    expect(written.dayNotes).toEqual([
+      { accountId: ACCOUNT, dayKey: '2026-09-22', text: '发烧在家', updatedAt: '2026-09-22T10:00:00+08:00' },
+    ])
+    const cleared = project([noteUpdated('b1', '2026-09-22', '先写后清'), noteUpdated('b1', '2026-09-22', '')])
+    expect(cleared.dayNotes).toEqual([])
   })
 })

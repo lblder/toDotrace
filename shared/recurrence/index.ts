@@ -14,6 +14,7 @@ export type { DayKey } from '@shared/time'
 
 export {
   AnchorInvariantError,
+  DEFAULT_NEXT_ANCHOR_MODE,
   ProgressionLimitError,
   RecurrenceRuleError,
 } from './types'

@@ -267,6 +267,26 @@ export function formatDayKey(dk: DayKey, style: 'short' | 'long' = 'short'): str
   return style === 'long' ? `${year}年${month}月${day}日` : `${month}月${day}日`
 }
 
+/**
+ * 把某个自然周渲染成一句给人看的话，如 `9月28日那一周`（ADR-009 §10，v1.3 补）。
+ *
+ * **入参是该周内的任意一天**，不是「必须传周一」——内部走 `weekStart` 规范化。
+ * 调用方手里往往只有一个落在这周里的日期（如某个 `plannedDate`），
+ * 要求它自己先折周一，就给了「忘记规范化」的机会；而规范化在本模块内是唯一一份（§5）。
+ *
+ * **为什么必须放在本模块而非组件里**：§6 已立规矩「界面上的日期呈现集中在此，
+ * 不得在组件里各自拼日期字符串」。阶段 4 出现了**周粒度**的日期（`plannedWeek`），
+ * 快速录入的预览必须显示**它实际解析出的粒度**——若对一条周级任务显示
+ * 「计划日 9月28日(周一)」，那是**用一个错的粒度**回答用户的输入，比不显示更糟。
+ *
+ * **措辞是契约**：它在预览、周视图标题、项目分组标题里出现，改动即用户可见。
+ * 取 `9月28日那一周` 而非 `9月28日–10月4日`——后者更精确但更长，
+ * 而预览区宽度有限，起止日期在周视图里本来就在表头（ADR-014 §4.3 已比较）。
+ */
+export function formatWeek(dk: DayKey): string {
+  return `${formatDayKey(weekStart(dk))}那一周`
+}
+
 /** 两位补零（月 / 日 / 时 / 分 / 秒） */
 function pad2(value: number): string {
   return String(value).padStart(2, '0')

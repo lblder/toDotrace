@@ -18,6 +18,16 @@ export type Freq = 'daily' | 'weekly' | 'monthly' | 'yearly'
 export type NextAnchorMode = 'extend' | 'catch_up' | 'recompute'
 
 /**
+ * 锚点模式的默认值（ADR-011 §5 的表：②「追赶到今天之后」为默认）。
+ *
+ * **只有一处声明**——ADR-014 §7 明令，且 quickadd 实现者按该条要求在
+ * `shared/quickadd/lexicon.ts` 里登记了一份临时常量等着并入这里。
+ * 两处各写一份 `'catch_up'` 字面量的后果是：改动默认值时要记得改两处，
+ * 而**漏改的那一处不会有任何症状**（它只在「用户没写锚点模式」时生效）。
+ */
+export const DEFAULT_NEXT_ANCHOR_MODE: NextAnchorMode = 'catch_up'
+
+/**
  * ADR-011 §2 的重复规则。
  *
  * 语法约束（§2「既然声称与 RRULE 直译，就必须遵守 RRULE 的语法约束」）：
@@ -64,6 +74,19 @@ export interface RecurrenceTemplate {
  *
  * `nextAnchorDate` 为 `null` 表示**规则已终止**（达到 `count` 或越过 `until`），
  * 不存在下一轮，此时 FR2.5 的「下一轮 X 日」提示不出现——**不得填越界日期充数**（§4）。
+ *
+ * ⚠️ **`nextAnchorMode` 放宽为 `NextAnchorMode | null`**（[ADR-013](../../docs/adr/013-任务实体与事件类型.md) §4.6
+ * 的授权，**本模块唯一的一处改动**，逻辑一行未改）：
+ * 阶段 4 的 `task/occurrence-completed` 把锚点写成**嵌套的可空对象** `next: { date, mode } | null`，
+ * 「没有下一轮」在类型上只有一个表示。于是映射时 `next === null` 会把 mode 一并抹掉，
+ * 而原来的必填非空在这里**填不上**（照字面实现会得到编译错误：
+ * `Type '"catch_up" | "extend" | "recompute" | undefined' is not assignable to type 'NextAnchorMode'`）。
+ *
+ * **为什么不伪造一个 mode**：那是往数据结构里写谎——「没有下一轮」时随便填一个 `catch_up`，
+ * 读的人会以为系统选了它。宁可让字段可空，也不填一个无意义的默认值。
+ *
+ * 依据（ADR-013 §4.6 复核实测）：**该字段全仓无人读**——`derive.ts` 只读 `nextAnchorDate`，
+ * 另外两处出现是定义与写入。放宽后本模块的 164 条测试仍全绿，无行为变化。
  */
 export interface RoundCompletion {
   /**
@@ -85,7 +108,8 @@ export interface RoundCompletion {
   originalPlannedDate: DayKey
   completedDayKey: DayKey
   nextAnchorDate: DayKey | null
-  nextAnchorMode: NextAnchorMode
+  /** 「没有下一轮」时为 `null`（与 `nextAnchorDate` 同生共死）——见上方 ADR-013 §4.6 的授权说明 */
+  nextAnchorMode: NextAnchorMode | null
   /**
    * ADR-001 §2 的排序键。「最近一次完成」按它判定（§4）——**不是**按 `completedDayKey`、
    * 更不是按数组顺序：跨设备合并与导入之后，「按事件 id 序」与「按完成日序」会给出不同答案，

@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 import type { DayKey } from '@shared/time'
 import type { NextAnchorMode, RecurrenceRule, RecurrenceTemplate } from '@shared/recurrence'
+import type { ProjectedTask } from '@shared/tasks/types'
 
 /**
  * 事件存储与重放的公开类型（ADR-010）。
@@ -12,9 +13,21 @@ import type { NextAnchorMode, RecurrenceRule, RecurrenceTemplate } from '@shared
  * **一律从 `@shared/recurrence` 取用**，此处只做转发：
  * ADR-011 §4 的 `deriveRounds(template, …)` 与本层的投影吃的是同一个实体，
  * 两处各写一份就是两个真相。
+ *
+ * 任务域的类型（`Task` / `Step` / `ProjectedTask` / `RecurrenceSpec`）同理，
+ * **一律从 `shared/tasks/types.ts` 导入**（ADR-013 §1 / §3：「`RecurrenceSpec` 的唯一落点
+ * 是 `shared/tasks/types.ts`，其它模块一律导入，不得就地重写一份字面量联合」）。
+ * 本文件只**转发**它们——**不再自己声明一份**：两个同名同形的接口就是两个真相的起点
+ * （改一处忘一处时，编译不报错而重放结果变了）。
+ * **依赖方向只能是 `shared → server`**：`shared/` 不得 import `server/`。
+ *
+ * 投影项目 / 每日备注的类型（`ProjectedProject` / `ProjectedDayNote`）**仍在本文件**：
+ * 它们是**事件层的投影行形状**（与两张表的列一一对应），不是域实体，
+ * 故不在 `shared/` 里——`shared/` 那边没有它们的第二个家。
  */
 
 export type { NextAnchorMode, RecurrenceRule, RecurrenceTemplate }
+export type { ProjectedTask, RecurrenceSpec, Step, Task } from '@shared/tasks/types'
 
 /** 一条事件的**内存形态**：字段与 `events` 表逐列对应，`payload` 是已解析的 JSON。 */
 export interface Event<P = unknown> {
@@ -73,16 +86,46 @@ export interface EventDraft<P = unknown> {
 }
 
 /**
- * 投影中的模板行 **就是** ADR-011 §4 的 `RecurrenceTemplate`——一个字段不加、不减。
+ * 投影中的项目行（ADR-016 §6 的 `projects` 表）。
  *
- * 曾经这里 `extends RecurrenceTemplate` 再补三个列（`accountId` / `createdAt` /
- * `updatedAt`）；`@shared/recurrence` 现已把这三列纳入模板类型自身，于是两者**逐字段相等**，
- * 别名才是诚实的写法：两处各留一份定义就是两个真相，而 `deriveRounds` 吃的正是这个类型。
- *
- * 三个附加列同样**可由事件重放得出**（账号取自事件的 `account_id`，时间取自事件的
- * `occurred_at`），故不违反「投影表中不得存放无法由事件重放得出的字段」（ADR-002 §2）。
+ * `isCurrent` 与 `deletedAt` 都**可由事件重放得出**（分别来自 `project/current-changed`
+ * 与 `project/deleted` 的载荷 / `occurred_at`），`endsOn` 等来自载荷——故不违反 ADR-002 §2。
+ * **没有 `status` 列**：项目的「是否已结束」是派生量（`projectState`，ADR-016 §4）。
  */
-export type ProjectedTemplate = RecurrenceTemplate
+export interface ProjectedProject {
+  id: string
+  accountId: string
+  name: string
+  /** dayKey，**含**（闭区间左端） */
+  startsOn: DayKey
+  /** dayKey，**含**（闭区间右端；起止同日 = 1 天项目，合法） */
+  endsOn: DayKey
+  /** 「当前项目」；同一账号**至多一个** true（由部分唯一索引兜底，ADR-016 §4） */
+  isCurrent: boolean
+  /** 软删除时刻；`null` = 未删除。**行永不被物理删除** */
+  deletedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 投影中的每日备注行（ADR-017 §6 的 `day_notes` 表）。
+ *
+ * 它**独立于到达**：FR1 的休息日恰恰是人最需要写一句的日子（「发烧在家」），
+ * 要求先打卡才能备注等于把这个功能从最需要它的场景里拿掉。
+ * 于是它不进 `days`（那会建出「有备注、无到达」的行，推翻 ADR-012 §2 的
+ * 「无行 ⇔ 无到达」不变式），而是自己一张表。
+ *
+ * **`text` 为空串即无备注**（ADR-013 §1：能用一个值表示的状态不要用两个）——
+ * 重放时空串即删除该行，`Projection.dayNotes` 里不存在「text 为空串」的元素。
+ */
+export interface ProjectedDayNote {
+  accountId: string
+  dayKey: DayKey
+  text: string
+  /** 最后写入时刻，取自 `note/updated` 的 `occurred_at` */
+  updatedAt: string
+}
 
 /**
  * 账号设置（ADR-010 §3 的 `Projection.settings`、§6 的 `settings` 表）。
@@ -111,7 +154,7 @@ export interface AccountSettings {
  * 于是「无行 ⇔ 无到达」恒成立——这是 ADR-012 §2 用结构（而非约定）保证的不变式，
  * FR1 的「无到达记录 = 休息日」与 ADR-002 §3 的「打卡天数 = COUNT(*)」都由它直接成立。
  *
- * `accountId` 与 `ProjectedTemplate` / `AccountSettings` 同理：它**可由事件重放得出**
+ * `accountId` 与 `ProjectedTask` / `ProjectedProject` / `AccountSettings` 同理：它**可由事件重放得出**
  * （取自事件的 `account_id` 列），不违反「投影表中不得存放无法由事件重放得出的字段」
  * （ADR-002 §2）；带上它是为了让 `writeProjection` 的跨账号守卫能逐行生效。
  *
@@ -131,17 +174,35 @@ export interface ProjectedDay {
 
 /**
  * 阶段 2 起的投影形状（ADR-010 §3）。后续阶段向其中追加各自的键：
- * 阶段 3 追加 `days`（ADR-012 §2）。
+ * 阶段 3 追加 `days`（ADR-012 §2）；阶段 4 追加 `tasks`（ADR-013 §5，**取代 `templates`**）、
+ * `projects`（ADR-016 §6）与 `dayNotes`（ADR-017 §6）。
+ *
+ * **每个数组的规范化顺序见 ADR-013 §5 的那张表**（`tasks` / `projects` 按 `id` 升序、
+ * `days` / `dayNotes` 按 `dayKey` 升序）——`canonicalizeProjection` 是它唯一的落点。
  */
 export interface Projection {
   /**
-   * 模板当前态。
+   * 任务当前态（ADR-013 §5，取代原 `templates`）。
    *
-   * **数组顺序按模板 id 升序规范化**：折叠顺序（事件 id）与模板 id 顺序并不相同，
-   * 若不做规范化，「增量维护」与「全量重建」两条路径产出的对象在数组顺序上会不同，
-   * 使 ADR-010 §5 要求的「两者结果一致」无法逐字段断言。
+   * **数组顺序按任务 `id` 升序规范化**：折叠顺序（事件 id）与任务 id 顺序并不相同——
+   * 任务会被原地更新、软删除、撤销批次改写——若不做规范化，「增量维护」与「全量重建」
+   * 两条路径产出的数组顺序会不同，使 ADR-010 §5 要求的「两者结果一致」无法逐字段断言
+   * （而 flaky 的断言会被当成测试问题而不是设计问题）。
    */
-  templates: ProjectedTemplate[]
+  tasks: ProjectedTask[]
+  /**
+   * 项目当前态（ADR-016 §6）。**数组顺序按 `id` 升序规范化**——理由同上。
+   *
+   * **包含已软删除的项目**：`deletedAt` 非空的行仍在投影里（否则「删项目后其下任务的
+   * `projectId` 仍可解析」这件事就没有落点）。要「未删除的项目」由读取方按
+   * `deletedAt === null` 过滤——ADR-014 §3 的 `ctx.projects` 正是这个口径。
+   */
+  projects: ProjectedProject[]
+  /**
+   * 每日备注（ADR-017 §6）。**数组顺序按 `dayKey` 升序规范化**——理由同上。
+   * `text` 为空串的行**不存在**于此（空串即清除，见 `ProjectedDayNote`）。
+   */
+  dayNotes: ProjectedDayNote[]
   /**
    * 账号设置当前态；`null` 表示**流水里还没有 `settings/updated` 事件**。
    *
@@ -151,7 +212,7 @@ export interface Projection {
    */
   settings: AccountSettings | null
   /**
-   * 打卡日（ADR-012 §2）。**数组顺序按 `dayKey` 升序规范化**——理由与模板相同：
+   * 打卡日（ADR-012 §2）。**数组顺序按 `dayKey` 升序规范化**——理由与 `tasks` 相同：
    * 折叠顺序是事件 id 序，不规范化就无法逐字段断言「增量 == 全量重建」（ADR-010 §5）。
    *
    * 顺带满足 ADR-012 §6 对 `dayKeys` 的前置条件（「已升序、已去重」）：
