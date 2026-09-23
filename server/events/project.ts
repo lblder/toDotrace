@@ -31,6 +31,35 @@ export function project(events: readonly Event[]): Projection {
 
   assertSingleAccount(events)
 
+  // 第 1–2 步（排定边界、按 id 升序）见 `foldedEvents`；第 3 步在这里：
+  // 逐条调用其 `EventDefinition.apply`。
+  for (const event of foldedEvents(events)) {
+    getEventDefinition(event.type).apply(projection, event)
+  }
+
+  canonicalizeProjection(projection)
+  return projection
+}
+
+/**
+ * **参与折叠的事件**（ADR-010 §4 的第 1、2 步）：排定覆盖面边界 → 按 `id` 升序 →
+ * 剔除覆盖面之前与被撤销批次内的事件。
+ *
+ * 抽出来是因为**它不只是 `project()` 的私事**：读模型同样吃它——
+ * 完成态、步骤勾选、顺延历史都由**事件**固化（ADR-007 §4 / ADR-013 §4.12 / §4.3），
+ * 而那些读路径若不按同一套边界过滤，就会出现「投影里任务已经回来了，
+ * 但它的完成记录还算数」这类**两个真相**。撤销一次完成批次之后，
+ * 那条完成事件必须**同时**从投影与读路径里消失——`project()` 与读模型
+ * 各写一份判据的话，这一条迟早只在一边生效（而且不报错）。
+ *
+ * 三条规则与 §4 逐字一致：
+ *   1. **覆盖面之前的全部事件（含锚点自身）不参与折叠**，但物理保留（ADR-004/010）。
+ *      用 id 比较而非数组下标：与重放排序键一致，且与输入顺序无关；
+ *   2. **被撤销批次内的事件跳过**；**revoke 事件自身不可被撤销**（ADR-006），
+ *      因此它在任何情况下都参与折叠（其 `apply` 是空操作，起作用的是它在第 1 步的贡献）；
+ *   3. 排序键唯一地是事件 `id`（ADR-001 §2）——**不得**用 rowid / 插入顺序 / `batch_id`。
+ */
+export function foldedEvents(events: readonly Event[]): Event[] {
   // ── 第 1 步：排定边界 ─────────────────────────────────────────────
   // 锚点取「id 最大的一条」而不是「数组里最后一条」：ADR-004 的约束明写
   // 「『最后一条锚点』的定位必须与重放排序键（ADR-001）一致，不得依赖 seq 或插入顺序」。
@@ -42,7 +71,7 @@ export function project(events: readonly Event[]): Projection {
   }
 
   // 撤销集合：**全部** revoke 事件的载荷目标。revoke 自身不参与该集合的构建
-  // （避免自指），且 revoke 事件本身不可被撤销 —— 见第 3 步的跳过条件。
+  // （避免自指），且 revoke 事件本身不可被撤销 —— 见下方的跳过条件。
   const revokedBatchIds = new Set<string>()
   for (const event of events) {
     if (event.type !== REVOKE_TYPE) continue
@@ -50,25 +79,12 @@ export function project(events: readonly Event[]): Projection {
     if (typeof target === 'string') revokedBatchIds.add(target)
   }
 
-  // ── 第 2 步：按 id 升序 ───────────────────────────────────────────
-  const ordered = [...events].sort(compareById)
-
-  // ── 第 3 步：折叠 ────────────────────────────────────────────────
-  for (const event of ordered) {
-    // 覆盖面**之前**的全部事件（含锚点自身）不参与折叠，但物理保留（ADR-004/010）。
-    // 用 id 比较而非数组下标：与重放排序键一致，且与输入顺序无关。
-    if (anchorId !== null && event.id <= anchorId) continue
-
-    // 被撤销批次内的事件跳过；**revoke 事件自身不可被撤销**（ADR-006），
-    // 因此它在任何情况下都参与折叠（其 apply 是空操作，起作用的是它在第 1 步的贡献）。
-    if (event.type !== REVOKE_TYPE && revokedBatchIds.has(event.batchId)) continue
-
-    // 未登记的 type 在这里抛错：无法重放的事件等于无法定义的状态
-    getEventDefinition(event.type).apply(projection, event)
-  }
-
-  canonicalizeProjection(projection)
-  return projection
+  // ── 第 2 步：按 id 升序（并剔除两类不参与折叠的事件）──────────────
+  return [...events].sort(compareById).filter((event) => {
+    if (anchorId !== null && event.id <= anchorId) return false
+    if (event.type !== REVOKE_TYPE && revokedBatchIds.has(event.batchId)) return false
+    return true
+  })
 }
 
 /**

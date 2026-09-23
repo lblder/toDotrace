@@ -112,7 +112,14 @@ export function isOutsideProjectRange(item: TodoItem, interval: ProjectInterval)
   if (item.plannedDate !== null) anchors.push(item.plannedDate)
   if (item.plannedWeek !== null) anchors.push(weekEnd(item.plannedWeek))
   if (item.dueDate !== null) anchors.push(item.dueDate)
-  anchors.push(item.occurrenceKey)
+  // ⚠️ **`occurrenceKey` 必须按 `recurring` 分流**——这是同一条 bug 的**第三次**发作：
+  //   `urgencyDates`（§4）与 `relevantDates`（§5）先中招，这里是第三处。
+  //   非重复任务的 `occurrenceKey` 恒为 `indexDate`，而它是**创建日**、不是排期日；
+  //   无条件计入会让「在项目区间内**创建**、却排期在区间外」的任务拿不到
+  //   `outside_project_range` —— 正是 ADR-015 §5 收录这条分组标注要防的那种
+  //   「用户看到一条十月排期的任务出现在九月结束的项目里，而界面不解释为什么」。
+  //   重复任务不受影响：那里 `occurrenceKey` 就是该轮的原计划日，是它唯一的排期日。
+  if (item.recurring) anchors.push(item.occurrenceKey)
   return !anchors.some(
     (dk) => compareDayKey(dk, interval.startsOn) >= 0 && compareDayKey(dk, interval.endsOn) <= 0,
   )

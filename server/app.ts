@@ -12,7 +12,11 @@ import { authRoutes } from './routes/auth.js'
 import { checkinRoutes } from './routes/checkin.js'
 import { inviteRoutes } from './routes/invites.js'
 import { memberRoutes } from './routes/members.js'
+import { projectRoutes } from './routes/projects.js'
+import { settingsRoutes } from './routes/settings.js'
 import { setupRoutes } from './routes/setup.js'
+import { taskRoutes } from './routes/tasks.js'
+import { undoRoutes } from './routes/undo.js'
 
 export interface AppOptions {
   db: Db
@@ -98,6 +102,12 @@ export function createApp(options: AppOptions): Express {
   app.use('/api/invites', inviteRoutes(db, config, requireAuth, requireOwner))
   app.use('/api/members', memberRoutes(db, requireAuth, requireOwner))
   app.use('/api/checkin', checkinRoutes(db, requireAuth))
+  // 阶段 4（ADR-017 §1）：任务 / 项目 / 设置 / 撤销。**全部需鉴权**，
+  // 响应体一律只含当前账号的数据；`accountId` 一律取自 `getAuth(req)`（§5）。
+  app.use('/api/tasks', taskRoutes(db, requireAuth))
+  app.use('/api/projects', projectRoutes(db, requireAuth))
+  app.use('/api/settings', settingsRoutes(db, requireAuth))
+  app.use('/api/undo', undoRoutes(db, requireAuth))
   app.use('/api', notFoundHandler)
 
   if (config.isProduction) {

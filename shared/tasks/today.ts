@@ -353,9 +353,24 @@ export interface TodoReadInput {
   today: DayKey
 }
 
-/** 步骤勾选的查找键：三者共同构成「某一轮的某个步骤」（ADR-013 §4.12） */
+/**
+ * 步骤勾选的查找键：三者共同构成「某一轮的某个步骤」（ADR-013 §4.12）。
+ *
+ * ⚠️ **分隔符必须写成 `\x00` 这个转义序列，不能在源码里嵌裸的 NUL 字节。**
+ * 两者的运行时行为**完全相同**，但**裸字节会让整个文件变成「二进制」**：
+ * `file` 判定为 `data`，而 **`grep` 会静默跳过它**——不报错、不提示，只是什么都不返回。
+ *
+ * 这是实测过的：本项目一度在这个文件里嵌了裸 NUL，于是
+ * **一次针对「`abandoned` 门槛到底存不存在」的 grep 返回空**，
+ * 协调者据此得出了「门槛不存在」的**错误结论**，并在发现前把它当成了事实。
+ * 更要紧的是 **ADR-013 §6 要求把静态纪律扫描的根扩到 `shared/`**——
+ * 一扩，这个 470 行的核心模块就会被那条扫描**静默漏掉**，而漏掉不会有任何症状。
+ *
+ * 分隔符选 NUL 的理由成立（它不可能出现在 UUID 或 `DayKey` 里），
+ * **只是必须用转义写法**。（`server/tasks/sources.ts` 有同款问题，见那里的注释。）
+ */
 function stepCheckKey(taskId: string, stepId: string, occurrenceKey: DayKey): string {
-  return `${taskId} ${stepId} ${occurrenceKey}`
+  return `${taskId}\x00${stepId}\x00${occurrenceKey}`
 }
 
 function buildOne(

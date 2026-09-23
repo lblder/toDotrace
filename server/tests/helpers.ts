@@ -4,10 +4,14 @@ import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import type { Server } from 'node:http'
 import type { Express } from 'express'
+import { DEFAULT_DAY_START_HOUR, toDayKey } from '@shared/time'
 import { createApp } from '../app.js'
 import type { Config } from '../config.js'
 import { openMigratedDatabase, type Db } from '../db/index.js'
 import type { LoginThrottle } from '../domain/login-throttle.js'
+import { readAccountEvents } from '../events/event-store.js'
+import { serverTimeZone } from '../events/settings.js'
+import { uuidv7 } from '../lib/uuid.js'
 
 /** 测试专用配置：短锁定窗口以外的取值与生产一致。 */
 export function testConfig(dbPath: string, overrides: Partial<Config> = {}): Config {
@@ -39,7 +43,15 @@ export interface TestContext {
 /** 每个测试文件一个独立临时库 + 一个真实监听（端口 0）的服务实例。 */
 export async function startTestServer(
   overrides: Partial<Config> = {},
-  appOptions: { logRequests?: boolean } = {},
+  appOptions: {
+    logRequests?: boolean
+    /**
+     * 错误日志出口。**可注入**是为了让 ADR-017 §2 那条「日志里必须带上 taskId 与
+     * originalPlannedDate」成为**可断言**的东西——一个只写进 `console.error` 的日志
+     * 没法被测试看见，而「写了但没人能验证」与「没写」在回归时没有区别。
+     */
+    logError?: (message: string, detail: unknown) => void
+  } = {},
 ): Promise<TestContext> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'todoagent-test-'))
   const dbPath = path.join(dir, 'app.db')
@@ -54,7 +66,7 @@ export async function startTestServer(
     db,
     config,
     throttle,
-    logError: () => {},
+    logError: appOptions.logError ?? (() => {}),
     logRequests: appOptions.logRequests ?? false,
   })
   const server = await new Promise<Server>((resolve) => {
@@ -145,4 +157,54 @@ export async function createMemberAccount(
   })
   if (res.status !== 200) throw new Error(`注册失败：${res.status} ${JSON.stringify(res.body)}`)
   return { id: res.body.user.id, username, token: res.body.token }
+}
+
+// ───────────────────── 阶段 4：任务 / 项目的测试便利函数 ─────────────────────
+
+/** `dayKey` 形态的「今天」（与账号设置同源：`serverTimeZone()` + 默认 dayStartHour）。 */
+export function todayKey(now: Date = new Date()): string {
+  return toDayKey(now, { timeZone: serverTimeZone(), dayStartHour: DEFAULT_DAY_START_HOUR })
+}
+
+/**
+ * 走真实 HTTP 建一条任务，返回响应体里的 `task`。
+ *
+ * `taskId` 缺省时由**测试**生成（ADR-017 §5.2：标识由客户端生成），
+ * 使「导出后再导入仍是同一条任务」在测试里也是同一条路径。
+ */
+export async function createTaskViaApi(
+  ctx: TestContext,
+  token: string,
+  overrides: Record<string, unknown> = {},
+): Promise<any> {
+  const taskId = typeof overrides.taskId === 'string' ? overrides.taskId : uuidv7()
+  const res = await api(ctx, 'POST', '/api/tasks', {
+    token,
+    body: { taskId, title: '测试任务', ...overrides },
+  })
+  if (res.status !== 200) {
+    throw new Error(`建任务失败：${res.status} ${JSON.stringify(res.body)}`)
+  }
+  return res.body.task
+}
+
+/** 走真实 HTTP 建一个项目，返回响应体里的 `project`。 */
+export async function createProjectViaApi(
+  ctx: TestContext,
+  token: string,
+  body: Record<string, unknown> = {},
+): Promise<any> {
+  const res = await api(ctx, 'POST', '/api/projects', {
+    token,
+    body: { projectId: uuidv7(), name: '项目', startsOn: '2026-09-01', endsOn: '2026-09-30', ...body },
+  })
+  if (res.status !== 200) {
+    throw new Error(`建项目失败：${res.status} ${JSON.stringify(res.body)}`)
+  }
+  return res.body.project
+}
+
+/** 该账号某类事件的条数（阶段 4 的「事件数没多」这类断言全靠它）。 */
+export function countEventsOfType(ctx: TestContext, accountId: string, type: string): number {
+  return readAccountEvents(ctx.db, accountId).filter((event) => event.type === type).length
 }

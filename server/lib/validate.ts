@@ -73,3 +73,22 @@ export function parseInput<T>(schema: z.ZodType<T>, value: unknown): T {
   }
   return result.data
 }
+
+/** 「本路由没有请求体」：空对象通过，**多一个字段即 400**（ADR-008 §8） */
+const emptyBodySchema = z.object({}).strict()
+
+/**
+ * **无请求体的写路由**（打卡的到达/离开、实例完成/取消、删除、切换当前项目）统一的入口校验。
+ *
+ * 它存在的理由只有一个，但是本阶段的最高优先级约束（ADR-017 §5）：
+ * 「请求体里的任何 `accountId` / `account_id` 字段一律因 `.strict()` 被拒（400），
+ * **而不是被忽略**」。路由的请求体契约是「无」——那就得**把「无」也校验一遍**，
+ * 否则一个带 `accountId` 的请求会一路走到域层，而它「碰巧没事」的原因是
+ * 服务端压根不读那个字段：**那是侥幸，不是契约**。
+ *
+ * 不带 body 时 Express 给出 `undefined`，`?? {}` 让它与 `{}` 同解——
+ * 于是「不传 body」与「传空对象」在这里是同一件事，不让调用方去猜。
+ */
+export function assertNoBody(body: unknown): void {
+  parseInput(emptyBodySchema, body ?? {})
+}

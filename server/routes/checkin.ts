@@ -2,13 +2,14 @@ import { Router, type Request, type RequestHandler } from 'express'
 import { z } from 'zod'
 import { compareDayKey, diffDays, isDayKey, type DayKey } from '@shared/time'
 import { arrive, leave, listDays, today } from '../checkin/service.js'
+import { getNote, putNote } from '../checkin/notes.js'
 import type { Db } from '../db/connection.js'
 import { invalidInput } from '../lib/errors.js'
-import { parseInput } from '../lib/validate.js'
+import { assertNoBody, parseInput } from '../lib/validate.js'
 import { getAuth } from '../middleware/auth.js'
 
 /**
- * 打卡（ADR-012 §3）。四条路由，**全部需鉴权**，响应体一律只含当前账号的数据。
+ * 打卡（ADR-012 §3）与每日备注（ADR-017 §1.4）。
  *
  * | 方法 | 路径 | 响应 |
  * |---|---|---|
@@ -16,6 +17,8 @@ import { getAuth } from '../middleware/auth.js'
  * | POST | `/api/checkin/leave`  | `{ day: DayRow, created: boolean }` |
  * | GET  | `/api/checkin/today`  | `{ day: DayRow \| null, streak: number }` |
  * | GET  | `/api/checkin/days?from=&to=` | `{ days: DayRow[] }`（**升序**） |
+ * | GET  | `/api/checkin/days/:dayKey/note` | `{ dayKey, text }` |
+ * | PUT  | `/api/checkin/days/:dayKey/note` | `{ dayKey, text }` |
  *
  * ## 接线（ADR-012 §4，本阶段最大风险点）
  *
@@ -74,14 +77,32 @@ export function parseDayRange(query: unknown): { from: DayKey; to: DayKey } {
 }
 
 /**
- * 两个 POST 都不接受请求体（ADR-012 §3）。空对象通过、多一个字段即 400——
- * `zod.strict()` 是 ADR-008 §8 给请求体定的形态，与「无 body 也能成功」并不冲突：
- * 不带 body 时 Express 给出 `undefined`，`?? {}` 让它与 `{}` 同解。
+ * 两个 POST 都不接受请求体（ADR-012 §3）——空对象通过、多一个字段即 400，
+ * 由 `lib/validate.ts` 的共享 `assertNoBody` 把关（ADR-008 §8 的「多给字段即 400」
+ * 在本阶段被 ADR-017 §5 提到最高优先级：`accountId` 只能是**被拒**，不能是**被忽略**）。
  */
-const emptyBodySchema = z.object({}).strict()
 
-function assertNoBody(req: Request): void {
-  parseInput(emptyBodySchema, req.body ?? {})
+/**
+ * 每日备注（ADR-017 §1.4，ADR-012 §1 的推迟项）。
+ *
+ * `text` 的上限取 **20000**：ADR-017 §3 只给任务的 `notes` 定了这个上限
+ * （「约 10 页文本；个人备注不会更长」），而每日备注与它同类、只会更短。
+ * 这是**一处 ADR 没规定、由实现者补的取值**（已报告）；不设上限的话，
+ * 唯一的边界会退化成 `express.json` 的 64kb 请求体上限。
+ */
+const noteBodySchema = z
+  .object({ text: z.string().max(20000, '备注最多 20000 个字符（与任务备注同一上限）') })
+  .strict()
+
+/** 路径里的 `dayKey`：非法即 400，**不透传给域层**（ADR-009 §7 的既有口径） */
+function dayKeyParam(req: Request): DayKey {
+  const value = req.params.dayKey
+  if (typeof value !== 'string' || !isDayKey(value)) {
+    throw invalidInput(
+      `dayKey 必须是真实存在的日历日（零填充定宽 YYYY-MM-DD），实得 '${String(value)}'`,
+    )
+  }
+  return value
 }
 
 export function checkinRoutes(db: Db, requireAuth: RequestHandler): Router {
@@ -90,7 +111,7 @@ export function checkinRoutes(db: Db, requireAuth: RequestHandler): Router {
   router.use(requireAuth)
 
   router.post('/arrive', (req, res) => {
-    assertNoBody(req)
+    assertNoBody(req.body)
     const accountId = getAuth(req).user.id
     // 一次打卡 = 一个批次 = 一个事务（ADR-012 §4）。`new Date()` 只在这里取一次：
     // 同一事务内的投影读写与事件时刻都基于它，不会出现「读的是一个时刻、写的是另一个」。
@@ -99,7 +120,7 @@ export function checkinRoutes(db: Db, requireAuth: RequestHandler): Router {
   })
 
   router.post('/leave', (req, res) => {
-    assertNoBody(req)
+    assertNoBody(req.body)
     const accountId = getAuth(req).user.id
     const result = db.transaction(() => leave(db, accountId, new Date()))()
     res.status(200).json(result)
@@ -114,6 +135,23 @@ export function checkinRoutes(db: Db, requireAuth: RequestHandler): Router {
     const accountId = getAuth(req).user.id
     const { from, to } = parseDayRange(req.query)
     res.json({ days: listDays(db, accountId, from, to) })
+  })
+
+  /**
+   * 备注**不依赖到达**（ADR-017 §6 的裁决）：这两条路由不查 `days`、也不建 `days` 行
+   * ——「无行 ⇔ 无到达」那条不变式由 `day_notes` 是独立表来保证（ADR-012 §2 不受影响）。
+   */
+  router.get('/days/:dayKey/note', (req, res) => {
+    const accountId = getAuth(req).user.id
+    res.json(getNote(db, accountId, dayKeyParam(req)))
+  })
+
+  router.put('/days/:dayKey/note', (req, res) => {
+    const accountId = getAuth(req).user.id
+    const dayKey = dayKeyParam(req)
+    const input = parseInput(noteBodySchema, req.body ?? {})
+    const result = db.transaction(() => putNote(db, accountId, new Date(), dayKey, input.text))()
+    res.status(200).json(result)
   })
 
   return router
