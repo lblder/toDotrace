@@ -119,10 +119,14 @@ describe('排序是一个**全序**（ADR-015 §后果 的回归）', () => {
     { id: taskId(5), plannedDate: TODAY, createdAt: same, importance: 'normal' },
   ])
 
-  it('**颠倒（并轮转）输入数组顺序不改变结果**', () => {
-    const expected = items.map((item) => item.taskId).sort()
-    for (let shift = 0; shift < items.length; shift += 1) {
-      expect(sortItems(shuffled(items, shift), TODAY).map((item) => item.taskId)).toEqual(expected)
+  it('**五种模式各自都是全序**：颠倒（并轮转）输入数组顺序不改变结果（§后果）', () => {
+    for (const mode of ['smart', 'due', 'created', 'importance', 'manual'] as const) {
+      const expected = sortItems(items, TODAY, mode).map((item) => item.taskId)
+      for (let shift = 0; shift < items.length; shift += 1) {
+        expect(sortItems(shuffled(items, shift), TODAY, mode).map((item) => item.taskId), mode).toEqual(
+          expected,
+        )
+      }
     }
   })
 
@@ -138,8 +142,8 @@ describe('排序是一个**全序**（ADR-015 §后果 的回归）', () => {
   })
 })
 
-describe('另外三种排序模式（**口径未经 ADR 批准**，见文件头与报告）', () => {
-  it("'due'：期限升序、无期限的排最后，同级回落智能序", () => {
+describe('其余四种排序模式（ADR-015 §4.1）', () => {
+  it("'due'：期限升序、**无期限的排最后**（不是最前——「没有期限」不该看起来最紧急）", () => {
     const items = build([
       { id: taskId(1), dueDate: '2026-10-01' },
       { id: taskId(2) }, // 无期限 → 最后
@@ -148,24 +152,106 @@ describe('另外三种排序模式（**口径未经 ADR 批准**，见文件头�
     expect(sortItems(items, TODAY, 'due').map((item) => item.taskId)).toEqual([taskId(3), taskId(1), taskId(2)])
   })
 
-  it("'created'：创建时间升序", () => {
+  it("'due' 同级（期限相同）回落「档位 → 重要性 → createdAt → taskId」", () => {
+    const items = build([
+      { id: taskId(1), dueDate: TOMORROW, importance: 'low' },
+      { id: taskId(2), dueDate: TOMORROW, importance: 'high' },
+    ])
+    // 期限相同 → 重要性 high 在前（§4.1 的 due 行里确实有这两级）
+    expect(sortItems(items, TODAY, 'due').map((item) => item.taskId)).toEqual([taskId(2), taskId(1)])
+  })
+
+  it("'created'：创建时间升序，**且不掺档位 / 重要性**（§4.1 该行只列了两把键）", () => {
     const items = build([
       { id: taskId(1), createdAt: '2026-09-05T09:00:00+08:00' },
       { id: taskId(2), createdAt: '2026-09-01T09:00:00+08:00' },
     ])
     expect(sortItems(items, TODAY, 'created').map((item) => item.taskId)).toEqual([taskId(2), taskId(1)])
+
+    // 档位/重要性相反的两条：早创建的是「无日期 + 低重要性」，晚创建的是「今天到期 + 高重要性」。
+    // 若中间插了「档位 → 重要性」两级，晚创建的那条会排到前面——那就不是「按创建时间」了。
+    const crossed = build([
+      { id: taskId(1), createdAt: '2026-09-01T09:00:00+08:00', importance: 'low' }, // 档 4
+      { id: taskId(2), createdAt: '2026-09-05T09:00:00+08:00', plannedDate: TODAY, importance: 'high' }, // 档 1
+    ])
+    expect(sortItems(crossed, TODAY, 'created').map((item) => item.taskId)).toEqual([taskId(1), taskId(2)])
+    // 对照：smart 模式下这两条的先后**相反**（档位优先），证明上面那条不是因为两条恰好同序
+    expect(sortItems(crossed, TODAY, 'smart').map((item) => item.taskId)).toEqual([taskId(2), taskId(1)])
   })
 
-  it("'importance'：重要性降序，同级回落智能序", () => {
+  it("'importance'：重要性降序，同级回落「档位 → createdAt → taskId」", () => {
     const items = build([
       { id: taskId(1), importance: 'low', plannedDate: TODAY },
-      { id: taskId(2), importance: 'high', plannedDate: NEXT_MONDAY },
-      { id: taskId(3), importance: 'high', plannedDate: TODAY },
+      { id: taskId(2), importance: 'high', plannedDate: NEXT_MONDAY }, // 档 4
+      { id: taskId(3), importance: 'high', plannedDate: TODAY }, // 档 1
     ])
     expect(sortItems(items, TODAY, 'importance').map((item) => item.taskId)).toEqual([
-      taskId(3), // high + 今天（同 importance 时智能序在前）
+      taskId(3), // high + 今天（同 importance 时档位在前）
       taskId(2), // high + 下周一
       taskId(1), // low
     ])
+  })
+})
+
+describe("'manual' 模式（ADR-015 §4.1）", () => {
+  it('**顺序真按 `manualOrder` 走**，而不是恰好与 `createdAt` 同序', () => {
+    // 两条任务的 `manualOrder` 与 `createdAt` **反序**：
+    // - 若 `TodoItem.manualOrder` 没被填（类型上有字段 ≠ 运行时有值），
+    //   两条都判成 `null` → 退化成按 `createdAt` → 顺序**反过来**，本用例立刻红；
+    // - 若 `manual` 模式看的是别的东西，也在这里红。
+    const items = build([
+      { id: taskId(1), createdAt: '2026-09-01T09:00:00+08:00', manualOrder: 2 },
+      { id: taskId(2), createdAt: '2026-09-05T09:00:00+08:00', manualOrder: 1 },
+    ])
+    expect(items.map((item) => item.manualOrder)).toEqual([2, 1]) // 先把运行时值钉住
+    expect(sortItems(items, TODAY, 'manual').map((item) => item.taskId)).toEqual([taskId(2), taskId(1)])
+  })
+
+  it('**`manualOrder === null` 排最后**，且 null 之间按 `createdAt`（新任务不插队）', () => {
+    const items = build([
+      { id: taskId(1), manualOrder: 20, createdAt: '2026-09-01T09:00:00+08:00' },
+      { id: taskId(2), manualOrder: null, createdAt: '2026-09-02T09:00:00+08:00' }, // 新任务
+      { id: taskId(3), manualOrder: 10, createdAt: '2026-09-03T09:00:00+08:00' },
+      { id: taskId(4), manualOrder: null, createdAt: '2026-09-04T09:00:00+08:00' },
+    ])
+    expect(sortItems(items, TODAY, 'manual').map((item) => item.taskId)).toEqual([
+      taskId(3), // manualOrder 10
+      taskId(1), // manualOrder 20
+      taskId(2), // null，createdAt 较早
+      taskId(4), // null
+    ])
+  })
+
+  it('`manual` 不掺档位 / 重要性——手动顺序优先于一切（§4.1 该行只有三把键）', () => {
+    const items = build([
+      { id: taskId(1), plannedDate: YESTERDAY, importance: 'high', manualOrder: 2 }, // 档 0
+      { id: taskId(2), plannedDate: NEXT_MONDAY, importance: 'low', manualOrder: 1 }, // 档 4
+    ])
+    expect(sortItems(items, TODAY, 'manual').map((item) => item.taskId)).toEqual([taskId(2), taskId(1)])
+  })
+
+  it('**`smart` 忽略 `manualOrder`**（两种模式不互相污染）', () => {
+    const items = build([
+      { id: taskId(1), plannedDate: TODAY, manualOrder: 99 },
+      { id: taskId(2), plannedDate: YESTERDAY, manualOrder: 1 },
+    ])
+    // 逾期（档 0）仍排在今天（档 1）之前——`manualOrder` 在 smart 下不生效
+    expect(sortItems(items, TODAY, 'smart').map((item) => item.taskId)).toEqual([taskId(2), taskId(1)])
+    // 换成 `manualOrder` 与档位**相反**的两条：两种模式的顺序必须分叉
+    const flipped = build([
+      { id: taskId(1), plannedDate: TODAY, manualOrder: 1 },
+      { id: taskId(2), plannedDate: YESTERDAY, manualOrder: 99 },
+    ])
+    expect(sortItems(flipped, TODAY, 'smart').map((item) => item.taskId)).toEqual([taskId(2), taskId(1)])
+    expect(sortItems(flipped, TODAY, 'manual').map((item) => item.taskId)).toEqual([taskId(1), taskId(2)])
+  })
+
+  it('`manualOrder` 完全相等时仍落到 `createdAt` → `taskId`（中值法耗尽 / 导入重复值）', () => {
+    const same = '2026-09-01T09:00:00+08:00'
+    const items = build([
+      { id: taskId(2), manualOrder: 5, createdAt: same },
+      { id: taskId(1), manualOrder: 5, createdAt: same },
+    ])
+    expect(sortItems(items, TODAY, 'manual').map((item) => item.taskId)).toEqual([taskId(1), taskId(2)])
   })
 })

@@ -146,11 +146,16 @@ export function isInstanceCompleted(item: TodoItem): boolean {
  * 口径 = FR2.2 的「未完成 且 期限日早于今天」，只是「期限日」取**折算后的最早紧迫日**：
  * 重复任务的 `dueDate` 恒为 null（ADR-013 §3.1），它的「期限」就是它自己那一天。
  *
- * ⚠️ 它与**档位**是两件事：已放弃的任务仍可能 `overdue === true`（它确实没做完），
- * 但档位是 5（§4 的 status 优先）。界面标红用 `overdue`，排序用档位。
+ * ⚠️ **已放弃的任务恒为 `false`**（§1 与 §理由 的裁定）。FR2.2 的字面没有排除已放弃，
+ * 但那个 `true` 没有用途且有害：它驱动「期限标红」，而**已经放弃的事不该继续催**——
+ * 把一条用户明确说了「不做了」的任务标红，是在替他惋惜，不是在描述事实。
+ * 判定顺序因此**必须是 status 优先**（与 `urgencyBucket` 同一条「压过一切」的次序）。
+ *
+ * ⚠️ 它与**档位**是两件事：`overdue` 回答「要不要催」，档位回答「排第几」。
  */
 export function isOverdue(item: TodoItem, today: DayKey): boolean {
   assertDayKey(today, 'today')
+  if (item.status === 'abandoned') return false // §1：已放弃恒为 false（档位仍是 5）
   if (isInstanceCompleted(item)) return false
   const earliest = earliestUrgencyDate(item)
   return earliest !== null && compareDayKey(earliest, today) < 0
@@ -410,6 +415,10 @@ function buildOne(
     recurring,
     pending: instance.pending !== null,
     createdAt: task.createdAt,
+    // 类型上有这个字段 ≠ 运行时有值：`manual` 模式（§4.1）整条判据都建在它上面，
+    // 漏了这一行会让所有任务都被判成 `null` → 静默退化成「按创建时间排序」。
+    // `sort.test.ts` 里有一条专门抓这个的用例（两条任务的 manualOrder 与 createdAt **反序**）。
+    manualOrder: task.manualOrder,
     overdue: false,
     reasons: [],
   }

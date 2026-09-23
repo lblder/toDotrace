@@ -15,12 +15,19 @@
  * 同一份数据在不同 Node 版本可能给出不同顺序。加上 ③ 才是全序，测试才可断言、
  * 界面才不会偶发抖动。（§后果 有一条专门的回归：「颠倒输入数组顺序不改变结果」。）
  *
- * ## 除 'smart' 以外的模式**不是被 ADR 定义过的**
+ * ## 五种模式（§4 定 `smart`，§4.1 定其余四种）
  *
- * FR2.6 还要求「按期限 / 按创建时间 / 按优先级 / 手动排序」，而 ADR-015 §4 只把
- * `smart` 精确到了可判定。这里的另外三个模式由本模块补上判定（都补 `taskId` 兜底），
- * **口径未经 ADR 批准**——已如实报告。**手动排序（`manualOrder`）实现不了**：
- * `TodoItem`（ADR-015 §1）里没有这个字段，见报告。
+ * | 模式 | 排序键 |
+ * |---|---|
+ * | `smart`（默认） | §4 的档位 → 重要性 → `createdAt` → `taskId` |
+ * | `due` | `dueDate` 升序（null 最后）→ 档位 → 重要性 → `createdAt` → `taskId` |
+ * | `created` | `createdAt` 升序 → `taskId` |
+ * | `importance` | 重要性 → 档位 → `createdAt` → `taskId` |
+ * | `manual` | `manualOrder` 升序（null 最后）→ `createdAt` → `taskId` |
+ *
+ * **五种都必须以 `taskId` 收尾**，否则不是全序（§4.1 明文，理由同上）。
+ * **`manual` 与 `smart` 不互相污染**：`manual` 不看档位，`smart` **不看 `manualOrder`**
+ * ——用户在手动模式里排好的顺序，切回智能排序不生效，再切回来仍在（§4.1）。
  */
 import { compareDayKey, isDayKey } from '@shared/time'
 import type { DayKey } from '@shared/time'
@@ -28,8 +35,8 @@ import type { DayKey } from '@shared/time'
 import { urgencyBucket } from './today'
 import type { Importance, TodoItem } from './types'
 
-/** 排序模式；`smart` 是 ADR-015 §4 定义的那一个（默认） */
-export type SortMode = 'smart' | 'due' | 'created' | 'importance'
+/** 排序模式（FR2.6 的五种）；`smart` 是默认（ADR-015 §4 / §4.1） */
+export type SortMode = 'smart' | 'due' | 'created' | 'importance' | 'manual'
 
 /** 重要性次序：`high` 最前（FR2.6「同一档比重要性」） */
 const IMPORTANCE_RANK: Readonly<Record<Importance, number>> = { high: 0, normal: 1, low: 2 }
@@ -70,7 +77,7 @@ export function compareBySmart(a: TodoItem, b: TodoItem, today: DayKey): number 
   return compareText(a.taskId, b.taskId)
 }
 
-/** 期限升序；**无期限的排在最后**（FR2.6「按期限」） */
+/** 期限升序；**无期限的排在最后**（§4.1：「没有期限」不该看起来最紧急），同级回落智能序 */
 function compareByDueDate(a: TodoItem, b: TodoItem, today: DayKey): number {
   if (a.dueDate === null && b.dueDate === null) return compareBySmart(a, b, today)
   if (a.dueDate === null) return 1
@@ -79,14 +86,42 @@ function compareByDueDate(a: TodoItem, b: TodoItem, today: DayKey): number {
   return diff !== 0 ? diff : compareBySmart(a, b, today)
 }
 
-/** 创建时间升序（③ 的 taskId 兜底同样不能省） */
-function compareByCreatedAt(a: TodoItem, b: TodoItem, today: DayKey): number {
-  const diff = compareText(a.createdAt, b.createdAt)
-  if (diff !== 0) return diff
-  return compareBySmart(a, b, today)
+/**
+ * 手动顺序（§4.1）：`manualOrder` 升序，**`null` 统一排在已手动排过的之后**，
+ * 于是**新任务不会插队到用户手工排好的清单中间**；`null` 之间按 `createdAt`。
+ *
+ * **不掺任何档位/重要性**——`manual` 只有这三把键（§4.1 的表）。
+ * `manualOrder` 由 `task/reordered` 写入（ADR-013 §4.5 的中值法），
+ * 本模块**只读不写**。
+ */
+function compareByManual(a: TodoItem, b: TodoItem): number {
+  if (a.manualOrder === null && b.manualOrder === null) {
+    const created = compareText(a.createdAt, b.createdAt)
+    return created !== 0 ? created : compareText(a.taskId, b.taskId)
+  }
+  if (a.manualOrder === null) return 1
+  if (b.manualOrder === null) return -1
+  if (a.manualOrder !== b.manualOrder) return a.manualOrder < b.manualOrder ? -1 : 1
+  // 两条 `manualOrder` 完全相等（中值法耗尽、或导入带来的重复值）时，
+  // 仍然要落到 `createdAt` → `taskId`，否则这一段不是全序
+  const created = compareText(a.createdAt, b.createdAt)
+  return created !== 0 ? created : compareText(a.taskId, b.taskId)
 }
 
-/** 重要性降序（`high` 最前），同级回落到智能序 */
+/**
+ * 创建时间升序（§4.1 的第一行「`created` = `createdAt` 升序 → `taskId`」）。
+ *
+ * ⚠️ **它只有这两把键**——不像 `due` / `importance` 那样中间还夹着「档位 → 重要性」。
+ * 这不是省笔墨：§4.1 的表在另外两行**明写了**那两级，这里没写，故按字面实现。
+ * 语义上也对：用户点「按创建时间」要的是**创建顺序**，若中间插一层档位，
+ * 一条早创建的逾期任务会被一条晚创建的未来任务挤到后面，那就不是按创建时间了。
+ */
+function compareByCreatedAt(a: TodoItem, b: TodoItem): number {
+  const diff = compareText(a.createdAt, b.createdAt)
+  return diff !== 0 ? diff : compareText(a.taskId, b.taskId)
+}
+
+/** 重要性降序（`high` 最前），同级回落智能序——即 §4.1 的「重要性 → 档位 → createdAt → taskId」 */
 function compareByImportance(a: TodoItem, b: TodoItem, today: DayKey): number {
   const diff = IMPORTANCE_RANK[a.importance] - IMPORTANCE_RANK[b.importance]
   if (diff !== 0) return diff < 0 ? -1 : 1
@@ -124,5 +159,7 @@ function comparatorFor(mode: SortMode): (a: TodoItem, b: TodoItem, today: DayKey
       return compareByCreatedAt
     case 'importance':
       return compareByImportance
+    case 'manual':
+      return compareByManual
   }
 }

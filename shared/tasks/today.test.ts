@@ -122,6 +122,13 @@ describe('入选规则 A–F（ADR-015 §3）', () => {
       indexDate: '2026-09-01',
       recurrence: { rule: { freq: 'daily', interval: 1 }, nextAnchorMode: 'catch_up', startsOn: TOMORROW },
     })
+    // §后果 的回归行：「`pending` 是 E 的**唯一**判据」——
+    // 用 `completedAt === null && recurring` 代替 `pending` 的实现会在这里红：
+    // 该任务一轮都没有，`occurrenceKey` 回落成 `indexDate`（= 创建日 ≤ today），
+    // 那个替代判据于是把它误判成「待完成轮次已逾期」→ **误进今日视图**。
+    expect(item.pending).toBe(false)
+    expect(item.occurrenceKey).toBe('2026-09-01') // 实例键回落（§2 的唯一稳定日期分量）
+    expect(selectionReasons(item, TODAY)).toEqual([])
     expect(isInTodayView(item, TODAY)).toBe(false)
   })
 
@@ -244,10 +251,18 @@ describe('紧迫日折算与档位（ADR-015 §4）', () => {
     expect(item.overdue).toBe(false)
   })
 
-  it('overdue 字段：判据与档位分开——已放弃的仍可能 overdue，但档位是 5', () => {
+  it('**`overdue` 对已放弃恒为 false**，而档位仍是 5（两条一起断言才钉得住）', () => {
     const abandoned = one({ id: taskId(1), dueDate: YESTERDAY, status: 'abandoned' })
-    expect(abandoned.overdue).toBe(true) // FR2.2：未完成 且 期限日早于今天
-    expect(urgencyBucket(abandoned, TODAY)).toBe(5) // §4：status 优先
+    // ⚠️ **这条用例翻过面**：第一版按 FR2.2 的字面取 `true`（「未完成 且 期限日早于今天」
+    // 没有排除已放弃），并在报告里登记为一处需要裁决的分叉。§1 / §理由 的裁定取 `false`：
+    // `overdue` 驱动的是「期限标红」，而**已经放弃的事不该继续催**——
+    // 把用户明确说了「不做了」的任务标红，是在替他惋惜，不是在描述事实。
+    expect(abandoned.overdue).toBe(false)
+    // 「不再催」与「排第几」是两件事：档位照旧由 status 优先（§4 的「压过一切」）
+    expect(urgencyBucket(abandoned, TODAY)).toBe(5)
+    expect(abandoned.reasons).toContain('bucket_abandoned')
+    // 未放弃的同款任务是 overdue 的——否则上面那条 `false` 可能只是「永远返回 false」
+    expect(one({ id: taskId(2), dueDate: YESTERDAY }).overdue).toBe(true)
   })
 
   it('overdue 用**紧迫日**而不是 dueDate（重复任务没有 dueDate）', () => {

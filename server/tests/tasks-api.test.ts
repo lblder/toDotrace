@@ -437,9 +437,11 @@ describe('GET /api/tasks（ADR-017 §1.1）', () => {
 
   it('scope=project 是**归属**判定：区间外的任务仍出现，区间只体现在分组标注上', async () => {
     const account = await freshAccount()
-    // 区间**不含今天**：`isOutsideProjectRange` 会把非重复任务的 `occurrenceKey`
-    // （= 创建日 = 今天）也算成一个锚点，若区间含今天，这条断言就测不到东西
-    // （见下面那条「已知偏离」用例）。
+    // 区间**不含今天**：这条用例测的是「排期在区间外 → 带分组标注」，
+    // 而不是「创建日在区间内会不会干扰它」——后者由下面那条**专测**（区间含今天）。
+    // `occurrenceKey` 的 `recurring` 分流已修（见 `isOutsideProjectRange` 的注释），
+    // 故「区间含今天」不再是会让这条断言失效的因素，但两条用例的**分工**仍然成立：
+    // 这条测区间外，那条测「创建日落在区间内也不影响判定」。
     const startsOn = addDays(TODAY, -20)
     const endsOn = addDays(TODAY, -5)
     const project = await createProjectViaApi(ctx, account.token, { name: '上旬课题', startsOn, endsOn })

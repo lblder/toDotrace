@@ -62,27 +62,26 @@ export const IMPORTANCE_TEXT: Readonly<Record<Importance, string>> = {
   low: '低',
 }
 
-/** FR2.6 的排序模式。**`manual` 不在这里**——见下面那条注释 */
+/**
+ * FR2.6 的排序模式。**五种，与 `SortMode` 一一对应。**
+ *
+ * > `manual` 一度**不在这里**，注释里写着它「实现不了」——理由当时是成立的：
+ * > `TodoItem` 上没有 `manualOrder`（而读取侧拿不到它，任何「按它排」的实现都只能凭空造值），
+ * > 写入侧 `POST /api/tasks/:id/order` 却存在，即**能写不能读**。
+ * >
+ * > **那个缺口已补**（`TodoItem.manualOrder` + `compareByManual`）。这条注释留在
+ * > 记录里，是因为它当时的具体措辞——**「界面不摆一个点了没用的排序模式」**——
+ * > 是正确判断：**缺口该让用户看不见，而不是让它看起来能用。**
+ * > 反过来，**缺口的修法不该是「把选项藏起来」，而是把它补上**；
+ * > 藏只是不误导，补才是完成。
+ */
 export const SORT_TEXT: Readonly<Record<SortMode, string>> = {
   smart: '智能排序',
   due: '按期限',
   created: '按创建时间',
   importance: '按重要性',
+  manual: '手动排序',
 }
-
-/*
- * ⚠️ **FR2.6 列的第四种排序模式「手动排序」在本版界面里不存在**，理由不是取舍：
- *
- * - `shared/tasks/sort.ts` 的 `SortMode` 只有 `smart | due | created | importance`
- *   （它自己的文件头写明：「手动排序（`manualOrder`）实现不了」）；
- * - 缺的输入是 `TodoItem.manualOrder`：ADR-015 §4.1 把它定义为排序键，但 §1 的
- *   `TodoItem` 字段表里**没有这个字段**，`shared/tasks/types.ts` 也没有。
- *   而读取侧拿不到 `manualOrder`，任何「按它排」的实现都只能凭空造一个值；
- * - 写入侧是存在的（`POST /api/tasks/:id/order`），即**能写不能读**。
- *
- * 界面**不摆一个点了没用的排序模式**（同 CheckinPage 对「撤销」按钮的处置）——
- * 摆上它只会让用户以为自己的手动顺序丢了。已如实报告。
- */
 
 export const STATUS_FILTER_TEXT: Readonly<Record<StatusFilter, string>> = {
   active: '进行中',

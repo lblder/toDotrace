@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { isOutsideProjectRange, matchesQuery, queryItems } from './filter'
 import type { TaskQuery } from './filter'
 import { buildTodoItems } from './today'
-import { completed, idsOf, task, taskId } from './test-fixtures'
+import { completed, dailyRule, idsOf, task, taskId } from './test-fixtures'
 import type { ProjectedTask } from './types'
 
 const TODAY = '2026-09-22'
@@ -131,6 +131,33 @@ describe('项目视图是**归属**不是区间（ADR-016 §10 的裁决 / ADR-0
 
   it('② 属于**别的**项目、日期落在 P 区间内的任务**不出现**（区间判定会把它错收进来）', () => {
     expect(idsOf(queryItems(items, query))).not.toContain(taskId(3))
+  })
+
+  it('区间判据不看 `occurrenceKey`（非重复任务）= 创建日——**同一条 bug 的第三次发作**', () => {
+    // 一条**在项目区间内创建**、却排期在区间外的任务：`occurrenceKey` 落在区间内
+    // （非重复任务的实例键恒为 `indexDate`，ADR-013 §2），而它的**排期**在区间外。
+    // 若判据把 `occurrenceKey` 无条件计入锚点，这条会被判成「区间内」→ 拿不到标注，
+    // 正是 §5 收录这条分组标注要防的那种「用户看到一条十二月排期的任务出现在
+    // 九月结束的项目里，而界面不解释为什么」。
+    const createdInside = project([
+      task({ id: taskId(7), projectId: PROJECT, indexDate: '2026-09-15', plannedDate: '2026-12-01' }),
+    ])[0]!
+    expect(createdInside.occurrenceKey).toBe('2026-09-15') // 实例键仍稳定（ADR-013 §2）
+    // 它与分组判据是两件事：前者必须稳定，后者看的是**排期**
+    expect(isOutsideProjectRange(createdInside, INTERVAL)).toBe(true)
+    expect(
+      queryItems([createdInside], { scope: { kind: 'project', projectId: PROJECT }, projectInterval: INTERVAL })[0]!
+        .reasons,
+    ).toContain('outside_project_range')
+  })
+
+  it('重复任务的 `occurrenceKey` **是**排期日，照常参与（分流不能一刀切）', () => {
+    // 「每日」任务的某一轮落在区间内 → 不算区间外
+    const recurringInRange = project([
+      task({ id: taskId(8), projectId: PROJECT, indexDate: '2026-09-01', recurrence: dailyRule() }),
+    ])[0]!
+    expect(recurringInRange.occurrenceKey).toBe(TODAY) // 本轮 = 今天（2026-09-22，在区间内）
+    expect(isOutsideProjectRange(recurringInRange, INTERVAL)).toBe(false)
   })
 
   it('未排期的项目级任务不会消失——它就是最典型的项目任务（ADR-016 §10 的「会消失」回归）', () => {
