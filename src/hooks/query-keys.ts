@@ -35,7 +35,7 @@ export const queryKeys = {
   /* --- 阶段 4（ADR-017） ------------------------------------------------ */
 
   /** 任务列表的**根**：失效时用它，一次把全部 scope 的缓存作废 */
-  tasks: ['tasks', 'list'] as const,
+  tasks: ['tasks'] as const,
   /** 某一个 scope 的列表；响应里的 `today` 也挂在它下面（服务端回带，ADR-015 §6） */
   taskList: (query: TaskListQuery) => ['tasks', 'list', ...taskListKey(query)] as const,
   taskDetail: (taskId: string) => ['tasks', 'detail', taskId] as const,
@@ -45,4 +45,11 @@ export const queryKeys = {
   settings: ['settings'] as const,
   /** 某一天的备注（ADR-017 §1.4，**与到达无关**） */
   dayNote: (dayKey: string) => ['checkin', 'note', dayKey] as const,
+  /** 今日聚焦按服务端归属日读取；跨日由 hook 定时重取。 */
+  focus: ['focus'] as const,
+  focusToday: ['focus', 'today'] as const,
+  /** Trace 聚合以区间、项目和目标时长隔离缓存。 */
+  trace: ['trace'] as const,
+  traceView: (period: string, projectId: string, goalMinutes: number) =>
+    ['trace', period, projectId, goalMinutes] as const,
 } as const

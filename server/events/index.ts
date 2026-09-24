@@ -49,6 +49,30 @@ export {
   checkinPayloadSchema,
   type CheckinPayload,
 } from './definitions/checkin.js'
+export {
+  FOCUS_ADDED_TYPE,
+  FOCUS_REMOVED_TYPE,
+  focusAddedDefinition,
+  focusRemovedDefinition,
+  focusEventDefinitions,
+  focusPayloadSchema,
+  type FocusEventPayload,
+} from './definitions/focus.js'
+export {
+  TIMER_CONFIGURED_TYPE,
+  TIMER_STARTED_TYPE,
+  TIMER_STOPPED_TYPE,
+  timerConfiguredDefinition,
+  timerStartedDefinition,
+  timerStoppedDefinition,
+  timerEventDefinitions,
+  timerConfiguredPayloadSchema,
+  timerStartedPayloadSchema,
+  timerStoppedPayloadSchema,
+  type TimerConfiguredPayload,
+  type TimerStartedPayload,
+  type TimerStoppedPayload,
+} from './definitions/timer.js'
 /**
  * `eventToCompletion` 的**唯一实现在 `@shared/tasks/rounds`**（ADR-013 §3 的跨越点之一：
  * 「进」是 `toRecurrenceTemplate`、「出」是 `eventToCompletion`，两个都在那里）。
@@ -105,6 +129,10 @@ export {
   projectCreatedPayloadSchema,
   projectCurrentChangedDefinition,
   projectCurrentChangedPayloadSchema,
+  projectOrderDefinition,
+  projectOrderPayloadSchema,
+  projectArchiveChangedDefinition,
+  projectArchiveChangedPayloadSchema,
   projectDeletedDefinition,
   projectDeletedPayloadSchema,
   projectEventDefinitions,
@@ -112,6 +140,8 @@ export {
   projectUpdatedPayloadSchema,
   type ProjectCreatedPayload,
   type ProjectCurrentChangedPayload,
+  type ProjectOrderPayload,
+  type ProjectArchiveChangedPayload,
   type ProjectDeletedPayload,
   type ProjectUpdatedPayload,
 } from './definitions/projects.js'

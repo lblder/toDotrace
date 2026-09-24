@@ -14,14 +14,7 @@ export interface ProjectsApi {
   readonly isLoading: boolean
   readonly isError: boolean
   readonly error: unknown
-  /**
-   * 可用的项目。
-   *
-   * ⚠️ **就是 `projects` 本身**：`GET /api/projects` 只返回**未删除**的项目
-   * （ADR-016 §6 的软删除在服务端就折掉了），故这里**不再按 `deletedAt` 过滤一次**
-   * ——那个字段在响应里根本不存在，滤一次会把项目全部滤空（一个静默的空列表）。
-   * 名字保留，是为了让调用方读起来仍是「可用项目」这层意思。
-   */
+  /** 未归档项目，显示在工作清单。 */
   readonly active: readonly ProjectRow[]
 }
 
@@ -48,7 +41,7 @@ export function useProjects(): ProjectsApi {
     isLoading: result.isLoading,
     isError: result.isError,
     error: result.error,
-    active: projects,
+    active: projects.filter((project) => !project.archived),
   }
 }
 
@@ -58,6 +51,7 @@ export function useProjectActions() {
     // 项目变化会改变任务列表里的项目名与「区间外」标注
     void queryClient.invalidateQueries({ queryKey: queryKeys.projects })
     void queryClient.invalidateQueries({ queryKey: queryKeys.tasks })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.trace })
   }
 
   const create = useMutation<{ project: ProjectRow }, Error, CreateProjectInput>({
@@ -85,5 +79,16 @@ export function useProjectActions() {
     onSuccess: done,
   })
 
-  return { create, update, remove, activate, clearCurrent }
+  const reorder = useMutation<ProjectListPayload, Error, string[]>({
+    mutationFn: (projectIds) => api.reorderProjects(projectIds),
+    onSuccess: (payload) => queryClient.setQueryData(queryKeys.projects, payload),
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.projects }) },
+  })
+
+  const archive = useMutation<{ project: ProjectRow }, Error, { projectId: string; archived: boolean }>({
+    mutationFn: ({ projectId, archived }) => api.setProjectArchived(projectId, archived),
+    onSuccess: done,
+  })
+
+  return { create, update, remove, activate, clearCurrent, reorder, archive }
 }

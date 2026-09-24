@@ -265,7 +265,7 @@ describe('注册表（ADR-010 §2）', () => {
       'checkin/left': withoutTarget,
       // 每日备注（ADR-017 §6）同理：`dayKey` 是日期值，不是某个实体的标识
       'note/updated': withoutTarget,
-      // 13 类任务事件的载荷都带 taskId，落点由载荷派生（ADR-013 §4）
+      // 任务事件的载荷都带 taskId，落点由载荷派生（ADR-013 §4）
       'task/created': withTarget,
       'task/updated': withTarget,
       'task/rescheduled': withTarget,
@@ -279,6 +279,11 @@ describe('注册表（ADR-010 §2）', () => {
       'task/step-renamed': withTarget,
       'task/step-toggled': withTarget,
       'task/steps-reordered': withTarget,
+      'task/focus-added': withTarget,
+      'task/focus-removed': withTarget,
+      'task/timer-configured': withTarget,
+      'task/timer-started': withTarget,
+      'task/timer-stopped': withTarget,
       // 项目事件（ADR-016 §5）：前三类的载荷带 projectId
       'project/created': withTarget,
       'project/updated': withTarget,
@@ -287,6 +292,8 @@ describe('注册表（ADR-010 §2）', () => {
       // 载荷允许 `projectId: null`（一个真实状态），而 `fromPayload` 必须返回**非空字符串**——
       // 声明它会让这一类合法事件根本写不进去。
       'project/current-changed': withoutTarget,
+      'project/order': withoutTarget,
+      'project/archive-changed': withTarget,
     }
     expect(Object.keys(expectedShape).sort()).toEqual(
       EVENT_DEFINITIONS.map((definition) => definition.type).sort(),

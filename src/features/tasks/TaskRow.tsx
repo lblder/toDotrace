@@ -5,7 +5,6 @@ import {
   canChangeStatus,
   canCompleteOccurrence,
   canUncompleteOccurrence,
-  isBucketReason,
   isInstanceCompleted,
   urgencyBucket,
   type TodoItem,
@@ -14,10 +13,11 @@ import type { ProjectRow } from '../../lib/api-client'
 import { errorMessage } from '../../lib/api-client'
 import { cx } from '../../lib/cx'
 import type { TaskActions } from '../../hooks/use-tasks'
+import { TimerControls } from '../timer/TimerControls'
 import { IconAlert } from '../common/Icons'
-import { BUCKET_LABEL, IMPORTANCE_TEXT, SELECTION_REASON_TEXT, STATUS_TEXT } from './labels'
+import { BUCKET_LABEL, IMPORTANCE_TEXT, STATUS_TEXT } from './labels'
 import { describeDate, describePlannedWeek } from './day-text'
-import { TaskDetailForm } from './TaskDetailForm'
+import { isUpcomingPreview, matchesPlanPeriod } from '@shared/tasks/views'
 
 export interface TaskRowProps {
   readonly item: TodoItem
@@ -25,16 +25,15 @@ export interface TaskRowProps {
   readonly today: DayKey
   readonly projects: readonly ProjectRow[]
   readonly actions: TaskActions
+  readonly selectionMode: boolean
   readonly selected: boolean
   readonly onToggleSelect: (taskId: string) => void
   readonly expanded: boolean
   readonly onToggleExpand: (taskId: string) => void
   readonly onDeleted: (input: { taskId: string; title: string; batchId: string }) => void
-  /**
-   * **写成功之后的页面级反馈**（见 `TaskDetailFormProps.onNotice` 的完整理由）：
-   * 行内状态会随「这一行进出当前视图」一起卸载，成功的确认必须活在行外面。
-   */
-  readonly onNotice: (input: { text: string }) => void
+  readonly focused?: boolean
+  readonly onToggleFocus?: () => void
+  readonly focusBusy?: boolean
 }
 
 /**
@@ -55,19 +54,35 @@ export function TaskRow({
   today,
   projects,
   actions,
+  selectionMode,
   selected,
   onToggleSelect,
   expanded,
   onToggleExpand,
   onDeleted,
-  onNotice,
+  focused = false,
+  onToggleFocus,
+  focusBusy = false,
 }: TaskRowProps) {
   const [error, setError] = useState<string | null>(null)
 
   const completed = isInstanceCompleted(item)
   const abandoned = item.status === 'abandoned'
+  const upcoming = isUpcomingPreview(item, today)
   const bucket = urgencyBucket(item, today)
   const bucketReason = bucketReasonOf(bucket)
+  // 排序档位合并了“无日期”和“以后”；显示时依据真实排期拆开，周计划也不冒充具体日。
+  let bucketLabel = BUCKET_LABEL[bucketReason]
+  if (!completed && !abandoned) {
+    if (bucket === 4 && matchesPlanPeriod(item, 'scheduled', today)) bucketLabel = '以后'
+    if (bucket === 0 && !(item.dueDate !== null && item.dueDate < today)) {
+      bucketLabel = item.recurring ? '待补做' : '待调整'
+    }
+    if (!item.recurring && item.plannedWeek !== null && item.plannedDate === null && item.dueDate === null) {
+      bucketLabel = matchesPlanPeriod(item, 'overdue', today) ? '待调整'
+        : matchesPlanPeriod(item, 'week', today) ? '本周' : '以后'
+    }
+  }
 
   /** 该行展示的是哪一轮实例 —— 勾选与完成都按它走（ADR-013 §4.12） */
   const occurrenceKey = item.occurrenceKey
@@ -119,16 +134,6 @@ export function TaskRow({
     recurring: item.recurring,
   })
 
-  function toggleStep(stepId: string, checked: boolean): void {
-    run(() => {
-      actions.toggleStep.mutate(
-        // `originalPlannedDate` 必填（ADR-017 §1.2）：勾选属于**本行显示的那一轮**。
-        // 这个值是 `item.occurrenceKey`——它来自服务端，不是前端算的。
-        { taskId: item.taskId, stepId, originalPlannedDate: occurrenceKey, checked },
-        { onError: (cause) => setError(errorMessage(cause)) },
-      )
-    })
-  }
 
   function deleteTask(): void {
     run(() => {
@@ -141,57 +146,50 @@ export function TaskRow({
     })
   }
 
-  const selectionReasons = item.reasons.filter((reason) => !isBucketReason(reason))
-
   return (
     <li
-      className={cx('ta-tasks__row', completed && 'ta-tasks__row--done', abandoned && 'ta-tasks__row--abandoned')}
+      className={cx('ta-tasks__row', completed && 'ta-tasks__row--done', abandoned && 'ta-tasks__row--abandoned', expanded && 'ta-tasks__row--selected')}
       data-task-id={item.taskId}
       data-occurrence-key={occurrenceKey}
     >
       <div className="ta-tasks__rowMain">
-        <input
+        {selectionMode ? <input
           type="checkbox"
-          className="ta-tasks__select"
+          className="ta-tasks__bulkCheck"
           checked={selected}
           onChange={() => onToggleSelect(item.taskId)}
           aria-label={`选中《${item.title}》用于批量顺延`}
-        />
-
-        <input
+        /> : <input
           type="checkbox"
           className="ta-tasks__check"
           checked={completed && !abandoned}
           onChange={toggleComplete}
-          disabled={actions.complete.isPending || actions.uncomplete.isPending}
+          disabled={upcoming || abandoned || actions.complete.isPending || actions.uncomplete.isPending}
+          title={upcoming ? '这是下一轮预览，到期后可以完成' : undefined}
           aria-label={completed ? `取消完成《${item.title}》` : `完成《${item.title}》`}
           data-testid={`complete-${item.taskId}`}
-        />
+        />}
 
         <div className="ta-tasks__rowBody">
           <p className="ta-tasks__title">
-            {item.importance === 'high' ? (
-              <span className="ta-tasks__star" title="重要性：高" aria-label="重要性：高">
-                ★
-              </span>
-            ) : null}
-            <span className={cx('ta-tasks__titleText', completed && !abandoned && 'ta-tasks__titleText--done')}>
+            <button type="button" onClick={() => onToggleExpand(item.taskId)} aria-label={`查看《${item.title}》详情`} className={cx('ta-tasks__titleText', 'ta-tasks__titleButton', completed && !abandoned && 'ta-tasks__titleText--done')}>
               {item.title}
-            </span>
+            </button>
             {item.recurring ? (
-              <span className="ta-badge" title="重复任务：日期由规则决定，三个日期锚点恒空">
+              <span className="ta-badge" title="按设置的规则重复">
                 重复
               </span>
             ) : null}
           </p>
 
           <p className="ta-tasks__meta">
+            {item.recurring ? <span className="ta-tasks__metaItem">{upcoming ? '下一轮' : '本轮'} {describeDate(item.occurrenceKey, today)}{upcoming ? ' · 到期后可执行' : ''}</span> : null}
             {/* 排序理由：FR2.6 要求「规则透明、界面上可见排序理由」 */}
             <span
               className={cx('ta-tasks__bucket', `ta-tasks__bucket--${bucket}`)}
               data-testid={`bucket-${item.taskId}`}
             >
-              {BUCKET_LABEL[bucketReason]}
+              {bucketLabel}
             </span>
 
             {item.plannedDate === null ? null : (
@@ -203,11 +201,11 @@ export function TaskRow({
             )}
             {item.dueDate === null ? null : (
               <span
-                className={cx('ta-tasks__metaItem', item.overdue && 'ta-tasks__metaItem--overdue')}
+                className={cx('ta-tasks__metaItem', !completed && !abandoned && item.dueDate < today && 'ta-tasks__metaItem--overdue')}
                 data-testid={`due-${item.taskId}`}
               >
                 期限 {describeDate(item.dueDate, today)}
-                {item.overdue ? ' · 已逾期' : ''}
+                {!completed && !abandoned && item.dueDate < today ? ' · 已逾期' : ''}
               </span>
             )}
             {item.projectId === null ? null : (
@@ -218,7 +216,7 @@ export function TaskRow({
                 #{tag}
               </span>
             ))}
-            {item.importance === 'normal' ? null : (
+            {item.importance !== 'low' ? null : (
               <span className="ta-tasks__metaItem">
                 重要性 {IMPORTANCE_TEXT[item.importance]}
               </span>
@@ -256,24 +254,10 @@ export function TaskRow({
               <p className="ta-tasks__stepsProgress" data-testid={`steps-progress-${item.taskId}`}>
                 步骤 {stepsDone}/{item.steps.length}
               </p>
-              <ul className="ta-tasks__stepList">
-                {item.steps.map((step) => (
-                  <li className="ta-tasks__step" key={step.id}>
-                    <input
-                      type="checkbox"
-                      checked={step.checkedAt !== null}
-                      onChange={(event) => toggleStep(step.id, event.target.checked)}
-                      aria-label={`步骤「${step.title}」（${item.title} 的这一轮）`}
-                      disabled={actions.toggleStep.isPending}
-                    />
-                    <span className={cx(step.checkedAt !== null && 'ta-tasks__stepText--done')}>
-                      {step.title}
-                    </span>
-                  </li>
-                ))}
-              </ul>
             </div>
           ) : null}
+
+          <TimerControls taskId={item.taskId} occurrenceKey={item.occurrenceKey} canStart={!abandoned && (!item.recurring || item.pending)} completed={completed} compact/>
 
           {error === null ? null : (
             <p className="ta-banner ta-banner--error ta-tasks__rowError" role="alert">
@@ -284,9 +268,31 @@ export function TaskRow({
         </div>
 
         <div className="ta-tasks__rowActions">
+          <button
+            type="button"
+            className={cx('ta-tasks__star', 'ta-tasks__starButton', item.importance === 'high' && 'ta-tasks__starButton--on')}
+            aria-label={item.importance === 'high' ? `取消《${item.title}》的重要标记` : `将《${item.title}》标为重要`}
+            aria-pressed={item.importance === 'high'}
+            title={item.importance === 'high' ? '取消重要标记' : '标为重要'}
+            disabled={actions.update.isPending}
+            onClick={() => run(() => actions.update.mutate({ taskId: item.taskId, input: { importance: item.importance === 'high' ? 'normal' : 'high' } }, { onError: (cause) => setError(errorMessage(cause)) }))}
+          >{item.importance === 'high' ? '★' : '☆'}</button>
+          {onToggleFocus === undefined ? null : (
+            <button
+              type="button"
+              className={cx('ta-tasks__focusButton', focused && 'ta-tasks__focusButton--on')}
+              onClick={onToggleFocus}
+              disabled={focusBusy || (!focused && (abandoned || completed || upcoming))}
+              aria-pressed={focused}
+              aria-label={focused ? `从我的一天移除《${item.title}》` : `将《${item.title}》加入我的一天`}
+              title={focused ? '移出我的一天，保留任务' : upcoming ? '到期后可加入我的一天' : '加入我的一天'}
+            >
+              {focused ? '◉' : '◎'}
+            </button>
+          )}
           {abandoned ? (
             <span className="ta-badge ta-tasks__statusBadge">{STATUS_TEXT.abandoned}</span>
-          ) : (
+          ) : item.recurring || completed ? null : (
             <button
               type="button"
               className={cx(
@@ -324,16 +330,6 @@ export function TaskRow({
         </div>
       </div>
 
-      {expanded ? (
-        <TaskDetailForm
-          item={item}
-          today={today}
-          projects={projects}
-          actions={actions}
-          selectionReasons={selectionReasons.map((reason) => SELECTION_REASON_TEXT[reason])}
-          onNotice={onNotice}
-        />
-      ) : null}
     </li>
   )
 }

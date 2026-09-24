@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
-import { addDays, diffDays, formatDayKey, weekEnd, weekStart } from '@shared/time'
+import { addDays, diffDays, weekEnd, weekStart } from '@shared/time'
 import { describeDay, describeWeek } from '@shared/quickadd'
 import {
   createProject,
@@ -45,6 +45,17 @@ function completeBox(row: ReturnType<typeof rowOf>, title: string) {
   return row.getByRole('checkbox', { name: new RegExp(`^(取消)?完成《${title}》$`) })
 }
 
+/** 桌面只有左侧导航；中心不再重复放 tabs。 */
+async function openView(page: Page, name: '我的一天' | '重要' | '计划' | '全部任务' | '已完成'): Promise<void> {
+  await page.getByRole('button', { name, exact: true }).first().click()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(name)
+}
+
+async function openPlanPeriod(page: Page, name: string): Promise<void> {
+  await openView(page, '计划')
+  await page.getByRole('group', { name: '计划时间筛选' }).getByRole('button', { name, exact: true }).click()
+}
+
 /*
  * 为什么完成复选框用 `.click()` 而不是 `.check()`：
  * 它是**受控**输入，勾上与否要等服务端那次往返回来（完成是一条事件，不是本地一个勾）。
@@ -56,6 +67,7 @@ function completeBox(row: ReturnType<typeof rowOf>, title: string) {
 /** 快速录入：清空后重打（清空会重置抑制集，见 ADR-014 §2 的坐标约束） */
 async function typeQuickAdd(page: Page, text: string): Promise<void> {
   const input = page.getByLabel('写点什么')
+  if (!(await input.isVisible())) await page.getByRole('button', { name: /新建任务/ }).click()
   await input.fill('')
   await input.fill(text)
 }
@@ -94,8 +106,9 @@ test.describe.serial('任务链路', () => {
     await gotoHash(page, stackOf().baseUrl, HASH.tasks)
     await expectScreen(page, 'tasks')
 
-    // 空态不是错误态：说清「这里没有任务」，并给出一条能用的输入示例
-    await expect(page.locator('.ta-tasks__empty')).toContainText('这个视图下没有任务')
+    // 新账号没有任务；默认进入我的一天。
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('我的一天')
+    await expect(page.locator('.ta-tasks__empty')).toContainText('暂无任务')
 
     const listed = await listTasks(stackOf(), token, 'today')
     serverToday = listed.today
@@ -143,7 +156,6 @@ test.describe.serial('任务链路', () => {
     await typeQuickAdd(page, '"明天 写报告"')
     await expect(page.getByTestId('quick-add-title')).toHaveText('明天 写报告')
     await expect(page.locator('.ta-tasks__chip')).toHaveCount(0)
-    await expect(page.locator('.ta-tasks__previewNote')).toContainText('整串引号')
 
     // 层②：单 token 反斜杠 —— 只保护它命中的那个片段
     await typeQuickAdd(page, '\\明天 写报告')
@@ -217,10 +229,11 @@ test.describe.serial('任务链路', () => {
     const inProgress = row.getByTestId(/^in-progress-/)
 
     // 打开详情 + 改重要性 + 保存 —— 这些都不该改变状态（01 FR2.1 v1.3）
-    await row.getByRole('button', { name: '详情' }).click()
-    await row.getByLabel('重要性').selectOption('high')
-    await row.getByRole('button', { name: '保存定义' }).click()
-    await expect(row.getByTestId('detail-feedback')).toContainText('已保存')
+    await row.getByRole('button', { name: '详情', exact: true }).click()
+    const detail = page.locator('.ta-tasks__right')
+    await detail.getByLabel('重要性').selectOption('high')
+    await detail.getByRole('button', { name: '保存任务' }).click()
+    await expect(detail.getByTestId('detail-feedback')).toContainText('已保存')
     await expect(inProgress).toHaveAttribute('aria-pressed', 'false')
 
     const beforeExplicit = await listTasks(stackOf(), token, 'all')
@@ -243,8 +256,7 @@ test.describe.serial('任务链路', () => {
     // 重复任务的「进行中」不可达（ADR-013 §2）：按钮禁用，且**说得出理由**
     await submitQuickAdd(page, '每天 写日记')
     const recurring = rowOf(page, '写日记')
-    await expect(recurring.getByTestId(/^in-progress-/)).toBeDisabled()
-    await expect(recurring.getByTestId(/^in-progress-/)).toHaveAttribute('title', /重复任务/)
+    await expect(recurring.getByTestId(/^in-progress-/)).toHaveCount(0)
   })
 
   test('6. 步骤：N/M 进度、单独勾选，且勾选带上这一轮的实例键', async () => {
@@ -263,6 +275,7 @@ test.describe.serial('任务链路', () => {
 
     await page.reload()
     await expectScreen(page, 'tasks')
+    await openView(page, '全部任务')
     const row = rowOf(page, '写论文第三章')
     await expect(row.getByTestId(/^steps-progress-/)).toHaveText('步骤 0/3')
 
@@ -270,7 +283,8 @@ test.describe.serial('任务链路', () => {
     const requestPromise = page.waitForRequest(
       (request) => request.url().includes('/steps/') && request.url().includes('/toggle'),
     )
-    await row.getByRole('checkbox', { name: /步骤「列提纲」/ }).click()
+    await row.getByRole('button', { name: '详情', exact: true }).click()
+    await page.getByRole('region', { name: '任务步骤' }).getByRole('checkbox', { name: /步骤「列提纲」/ }).click()
     const toggleRequest = await requestPromise
     const body = toggleRequest.postDataJSON() as { originalPlannedDate?: string; checked?: boolean }
 
@@ -290,6 +304,7 @@ test.describe.serial('任务链路', () => {
     // 刷新后勾选仍在（勾选是事件，不是界面状态）
     await page.reload()
     await expectScreen(page, 'tasks')
+    await openView(page, '全部任务')
     await expect(rowOf(page, '写论文第三章').getByTestId(/^steps-progress-/)).toHaveText('步骤 1/3')
   })
 
@@ -320,33 +335,30 @@ test.describe.serial('任务链路', () => {
     await page.reload()
     await expectScreen(page, 'tasks')
 
-    await page.getByRole('tab', { name: '项目' }).click()
-    // 还没有当前项目：此时界面**不渲染清单**，而是说清「先选一个项目」——
-    // 退回「全部」会让标签页写着「项目」却列着全部任务，那是一件说了假话的界面。
-    await expect(page.getByRole('status')).toContainText('还没有当前项目')
-    await expect(page.locator('.ta-tasks__list')).toHaveCount(0)
-
-    await page.getByLabel('查看哪个项目').selectOption(projectId)
+    // 具体项目直接出现在左侧；不再有泛化“项目”页和二次选择器。
+    await page.getByRole('navigation', { name: '我的项目' }).getByRole('button', { name: '秋季课题' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('秋季课题')
 
     await expect(rowOf(page, '十月的实验')).toHaveCount(1)
     // 分组标题解释了「它为什么在这里」，而不是让它看起来像 bug
-    await expect(page.locator('.ta-tasks__groupHeading')).toContainText('排期在项目区间之外')
+    await expect(page.locator('.ta-tasks__groupHeading')).toContainText('项目周期之外')
   })
 
   test('8. 批量顺延：一个请求一个批次，重复任务整批拒绝', async () => {
+    await openView(page, '全部任务')
     await submitQuickAdd(page, '今天 批量甲')
     await submitQuickAdd(page, '今天 批量乙')
 
-    await page.getByRole('tab', { name: '全部' }).click()
     await page.getByLabel('状态筛选').selectOption('active')
 
+    await page.getByRole('button', { name: '批量选择', exact: true }).click()
     await rowOf(page, '批量甲').getByRole('checkbox', { name: /^选中/ }).check()
     await rowOf(page, '批量乙').getByRole('checkbox', { name: /^选中/ }).check()
 
     const target = addDays(serverToday, 5)
     await page.getByLabel('顺延到').fill(target)
     await page.getByRole('button', { name: '顺延', exact: true }).click()
-    await expect(page.getByTestId('board-banner')).toContainText('同一个批次')
+    await expect(page.getByTestId('board-banner')).toContainText('已顺延 2 条')
 
     const listed = await listTasks(stackOf(), token, 'all')
     expect(itemByTitle(listed, '批量甲').plannedDate).toBe(target)
@@ -357,17 +369,18 @@ test.describe.serial('任务链路', () => {
     await page.getByLabel('顺延到').fill(addDays(serverToday, 6))
     await page.getByRole('button', { name: '顺延', exact: true }).click()
     await expect(page.getByTestId('board-banner')).toContainText('重复任务')
-    await expect(page.getByTestId('board-banner')).toContainText('整批拒绝')
+    await expect(page.getByTestId('board-banner')).toContainText('取消选中')
 
     // 它没被挪动（整批都没写进去）
     const after = await listTasks(stackOf(), token, 'all')
     expect(itemByTitle(after, '写日记').plannedDate ?? null).toBeNull()
+    await page.getByRole('button', { name: '退出批量选择', exact: true }).click()
   })
 
   test('9. 删除是软删除且可撤销（撤销走 POST /api/undo，按批次）', async () => {
     await submitQuickAdd(page, '今天 待删除的任务')
 
-    await page.getByRole('tab', { name: '全部' }).click()
+    await openView(page, '全部任务')
     await rowOf(page, '待删除的任务').getByRole('button', { name: '删除《待删除的任务》' }).click()
 
     // 撤销窗口只在界面上，服务端能撤销任何批次（ADR-017 §8）
@@ -445,6 +458,7 @@ test.describe.serial('任务链路', () => {
     })
     await page.reload()
     await expectScreen(page, 'tasks')
+    await openView(page, '全部任务')
 
     const row = rowOf(page, '会被带外放弃的任务')
     await expect(row).toHaveCount(1)
@@ -471,13 +485,15 @@ test.describe.serial('任务链路', () => {
    * 状态筛选归前端），这一条随之转绿。**它留着，是为了钉住那个修复。**
    */
   test('12. 已完成 → 放弃：历史区仍显示完成过，而它不再呈现为已完成', async () => {
+    await openView(page, '全部任务')
     await submitQuickAdd(page, '今天 磨金相')
     await completeBox(rowOf(page, '磨金相'), '磨金相').click()
+    await page.getByLabel('状态筛选').selectOption('completed')
     await expect(rowOf(page, '磨金相').getByTestId(/^bucket-/)).toHaveText('已完成')
 
     // 从详情里放弃（已完成 → 已放弃 是**合法迁移**，且**只写一条状态事件**）
-    await rowOf(page, '磨金相').getByRole('button', { name: '详情' }).click()
-    await rowOf(page, '磨金相').getByTestId(/^abandon-/).click()
+    await rowOf(page, '磨金相').getByRole('button', { name: '详情', exact: true }).click()
+    await page.locator('.ta-tasks__right').getByTestId(/^abandon-/).click()
 
     /*
      * 放弃会让这一行**立刻从默认视图消失**（§4 的优先级表），所以确认必须来自
@@ -491,7 +507,6 @@ test.describe.serial('任务链路', () => {
      * 要找到它得显式筛「已放弃」——这也正是「已放弃的任务仍然要能被找到，
      * 否则用户无法重新打开它」那条要求的落点。
      */
-    await page.getByRole('tab', { name: '全部' }).click()
     await page.getByLabel('状态筛选').selectOption('abandoned')
     const abandoned = rowOf(page, '磨金相')
     await expect(abandoned).toHaveCount(1)
@@ -516,25 +531,23 @@ test.describe.serial('任务链路', () => {
     await page.getByLabel('状态筛选').selectOption('completed')
     await expect(rowOf(page, '磨金相')).toHaveCount(0)
 
-    // ⑤ 重新打开之后回到正常清单。详情面板一直是展开的（它在上面那一步被打开过，
-    //    行被筛掉又筛回来时 `expanded` 状态仍在），故这里直接点「重新打开」。
+    // ⑤ 重新打开之后不再是“已放弃”；完成事实没有被取消，所以回到“已完成”分组。
     await page.getByLabel('状态筛选').selectOption('abandoned')
-    await expect(rowOf(page, '磨金相').locator('.ta-tasks__detail')).toBeVisible()
-    await rowOf(page, '磨金相').getByRole('button', { name: '重新打开（回到未开始）' }).click()
-    // 重开之后它回到了未开始，于是又**从「已放弃」筛选里消失**——确认同样只能来自
-    // 页面级那条横幅。这与放弃那一步是同一个理由，两个方向各验一次。
+    await rowOf(page, '磨金相').getByRole('button', { name: '详情', exact: true }).click()
+    await expect(page.locator('.ta-tasks__right .ta-tasks__detail')).toBeVisible()
+    await page.locator('.ta-tasks__right').getByRole('button', { name: '重新打开（回到未开始）' }).click()
+    // 重开之后它从“已放弃”筛选消失，确认仍来自页面级横幅。
     await expect(page.getByTestId('board-banner')).toContainText('已重新打开')
-    await page.getByLabel('状态筛选').selectOption('default')
+    await page.getByLabel('状态筛选').selectOption('completed')
     await expect(rowOf(page, '磨金相')).toHaveCount(1)
+    const reopened = itemByTitle(await listTasks(stackOf(), token, 'all'), '磨金相')
+    expect(reopened.status).toBe('not_started')
+    expect(reopened.completedDayKey).toBe(serverToday)
   })
 
 
-  /*
-   * 视图切换的**区间边界**（ADR-015 §5）：周视图是闭区间 `[weekStart(today), weekEnd(today)]`，
-   * **两端都含**。这里用两条任务把两端各钉一次，且不依赖「今天是星期几」——
-   * 期望值全部由服务端回带的 `today` 折出来。
-   */
-  test('13. 本周视图是闭区间：周日那条在，下周一那条不在；而它俩都不在「今日」里', async () => {
+  /* 计划筛选的周区间两端都含；今天严格只认日级锚点 = today。 */
+  test('13. 计划本周包含周日、不含下周一；今天严格只看当天', async () => {
     const weekEndDay = weekEnd(serverToday)
     const nextMonday = addDays(weekEndDay, 1)
 
@@ -549,21 +562,19 @@ test.describe.serial('任务链路', () => {
       plannedDate: nextMonday,
     })
 
-    await page.getByRole('tab', { name: '今日' }).click()
-    await page.getByLabel('状态筛选').selectOption('default')
+    await page.reload()
+    await expectScreen(page, 'tasks')
+    await openPlanPeriod(page, '今天')
 
-    // 今天（或更早）才算「今日」：周末那两条都还没到期，因此一条都不该在这儿
+    // 今天必须恰为当天；周末那两条不会因“在本周”就被算成今天。
     if (weekEndDay !== serverToday) {
       await expect(rowOf(page, '本周日的事')).toHaveCount(0)
     }
     await expect(rowOf(page, '下周一的事')).toHaveCount(0)
 
-    await page.getByRole('tab', { name: '本周' }).click()
+    await page.getByRole('group', { name: '计划时间筛选' }).getByRole('button', { name: '本周' }).click()
     await expect(page.getByTestId('server-today')).toHaveText(serverToday)
-    // 表头给出这一周的两端——用户据此知道「本周」是哪一段
-    await expect(page.locator('.ta-tasks__todayLine')).toContainText(
-      `${formatDayKey(weekStart(serverToday))} – ${formatDayKey(weekEndDay)}`,
-    )
+    await expect(page.locator('.ta-tasks__planFilter')).toContainText(`${weekStart(serverToday)} — ${weekEndDay}`)
     // 右端（周日）**在内**；区间外的下周一**不在**
     await expect(rowOf(page, '本周日的事')).toHaveCount(1)
     await expect(rowOf(page, '下周一的事')).toHaveCount(0)
@@ -577,16 +588,15 @@ test.describe.serial('任务链路', () => {
    * 顺序反了服务端会以 400 拒绝。这一条把它端到端跑一遍。
    */
   test('14. 打开重复：先清空三个日期锚点，再写规则（ADR-013 §3.1 的两步写入）', async () => {
-    await page.getByRole('tab', { name: '今日' }).click()
-    await page.getByLabel('状态筛选').selectOption('default')
+    await openPlanPeriod(page, '今天')
     await submitQuickAdd(page, '今天 整理记录')
 
     const row = rowOf(page, '整理记录')
-    await row.getByRole('button', { name: '详情' }).click()
+    await row.getByRole('button', { name: '详情', exact: true }).click()
 
     // 开启「每天」——此时这条任务还带着 `plannedDate`
-    await row.getByLabel('重复频率').selectOption('daily')
-    await row.getByRole('button', { name: '保存定义' }).click()
+    await page.locator('.ta-tasks__right').getByLabel('重复频率').selectOption('daily')
+    await page.locator('.ta-tasks__right').getByRole('button', { name: '保存任务' }).click()
     // 确认来自**页面级**横幅：这两次写入之间本行会短暂离开今日视图（先清锚点、再写规则），
     // 行内的那条反馈会随行一起卸载——用户看到的会是「点了保存，什么都没说」。
     await expect(page.getByTestId('board-banner')).toContainText('已保存')
@@ -600,7 +610,7 @@ test.describe.serial('任务链路', () => {
     // 行上出现「重复」徽标，且「进行中」对它不可达（ADR-013 §2）
     // 标题旁的「重复」徽标（用 class 定位：详情面板里还有一个「重复」的字段标签，两者不同）
     await expect(rowOf(page, '整理记录').locator('.ta-tasks__title .ta-badge')).toHaveText('重复')
-    await expect(rowOf(page, '整理记录').getByTestId(/^in-progress-/)).toBeDisabled()
+    await expect(rowOf(page, '整理记录').getByTestId(/^in-progress-/)).toHaveCount(0)
   })
 
   /*
@@ -618,7 +628,7 @@ test.describe.serial('任务链路', () => {
     // 展开一条任务的详情，把里面那一批控件也算进来
     const row = rowOf(page, '写论文第三章')
     if ((await row.count()) > 0) {
-      const toggle = row.getByRole('button', { name: /详情|收起/ })
+      const toggle = row.getByRole('button', { name: /^(详情|收起)$/ })
       if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
     }
 
@@ -637,6 +647,59 @@ test.describe.serial('任务链路', () => {
     }
 
     expect(unnamed, `这些控件没有可访问名：\n${unnamed.join('\n')}`).toEqual([])
+  })
+
+  test('16. 今日聚焦：选入、刷新后仍在、移除后从聚焦清单消失', async () => {
+    await openView(page, '全部任务')
+    await submitQuickAdd(page, '聚焦验证任务')
+
+    const row = rowOf(page, '聚焦验证任务')
+    await row.getByRole('button', { name: '将《聚焦验证任务》加入我的一天' }).click()
+    await expect(row.getByRole('button', { name: '从我的一天移除《聚焦验证任务》' })).toBeVisible()
+
+    await openView(page, '我的一天')
+    await expect(rowOf(page, '聚焦验证任务')).toHaveCount(1)
+    await page.reload()
+    await expectScreen(page, 'tasks')
+    await expect(rowOf(page, '聚焦验证任务')).toHaveCount(1)
+
+    await rowOf(page, '聚焦验证任务').getByRole('button', { name: '从我的一天移除《聚焦验证任务》' }).click()
+    await expect(rowOf(page, '聚焦验证任务')).toHaveCount(0)
+  })
+
+  test('17. 重复任务完成后，今日聚焦仍展示选中的已完成轮次', async () => {
+    await openView(page, '全部任务')
+    await submitQuickAdd(page, '今天 每天 聚焦重复任务')
+    const row = rowOf(page, '聚焦重复任务')
+    const selectedKey = await row.getAttribute('data-occurrence-key')
+    expect(selectedKey).toBe(serverToday)
+    await expect(row.getByRole('button', { name: '从我的一天移除《聚焦重复任务》' })).toBeVisible()
+
+    await openView(page, '我的一天')
+    await completeBox(rowOf(page, '聚焦重复任务'), '聚焦重复任务').click()
+
+    // 当前日完成后读模型通常暂留已完成轮次；模拟下一轮成为列表当前行时，
+    // 聚焦仍必须按原实例键去详情的轮次历史取回完成事实。
+    await page.route('**/api/tasks?scope=all', async (route) => {
+      const response = await route.fetch()
+      const payload = await response.json() as { today: string; items: Array<Record<string, unknown>> }
+      await route.fulfill({
+        response,
+        json: {
+          ...payload,
+          items: payload.items.map((item) => item.title === '聚焦重复任务'
+            ? { ...item, occurrenceKey: addDays(serverToday, 1), completedAt: null, completedDayKey: null, pending: true }
+            : item),
+        },
+      })
+    })
+    await page.reload()
+    await expectScreen(page, 'tasks')
+    const historical = rowOf(page, '聚焦重复任务')
+    await expect(historical).toHaveAttribute('data-occurrence-key', selectedKey ?? '')
+    await expect(completeBox(historical, '聚焦重复任务')).toBeChecked()
+    await historical.getByRole('button', { name: '详情', exact: true }).click()
+    await expect(page.getByTestId('detail-occurrence')).toHaveText(serverToday)
   })
 })
 

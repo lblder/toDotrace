@@ -13,6 +13,8 @@ import {
   createProject,
   deleteProject,
   listProjects,
+  reorderProjects,
+  setProjectArchived,
   updateProject,
   type ProjectPatch,
 } from '../projects/service.js'
@@ -79,6 +81,12 @@ const updateProjectSchema = z
   })
   .strict()
 
+const projectOrderSchema = z.object({
+  projectIds: z.array(z.string().refine(isUuidV7, 'projectId 必须是 UUIDv7')),
+}).strict()
+
+const archiveProjectSchema = z.object({ archived: z.boolean() }).strict()
+
 function pathParam(req: Request, name: string): string {
   const value = req.params[name]
   if (typeof value !== 'string' || value.length === 0) {
@@ -94,6 +102,12 @@ export function projectRoutes(db: Db, requireAuth: RequestHandler): Router {
   router.get('/', (req, res) => {
     const accountId = getAuth(req).user.id
     res.json(listProjects(db, accountId, new Date()))
+  })
+
+  router.put('/order', (req, res) => {
+    const accountId = getAuth(req).user.id
+    const { projectIds } = parseInput(projectOrderSchema, req.body ?? {})
+    res.json(db.transaction(() => reorderProjects(db, accountId, new Date(), projectIds))())
   })
 
   router.post('/', (req, res) => {
@@ -125,6 +139,13 @@ export function projectRoutes(db: Db, requireAuth: RequestHandler): Router {
     assertNoBody(req.body)
     const result = db.transaction(() => activateProject(db, accountId, new Date(), id))()
     res.status(200).json(result)
+  })
+
+  router.patch('/:id/archive', (req, res) => {
+    const accountId = getAuth(req).user.id
+    const id = pathParam(req, 'id')
+    const { archived } = parseInput(archiveProjectSchema, req.body ?? {})
+    res.json(db.transaction(() => setProjectArchived(db, accountId, new Date(), id, archived))())
   })
 
   router.patch('/:id', (req, res) => {

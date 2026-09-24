@@ -1,130 +1,172 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { compareDayKey, formatDayKey, weekEnd, weekStart } from '@shared/time'
 import type { DayKey } from '@shared/time'
-import {
-  canRescheduleTask,
-  queryItems,
-  sortItems,
-  type SortMode,
-  type StatusFilter,
-} from '@shared/tasks'
+import { queryItems, sortItems, type SortMode, type StatusFilter, type TodoItem } from '@shared/tasks'
+import { itemKey, matchesPlanPeriod, matchesCompletionPeriod, upcomingTaskItem, isUpcomingPreview, planCreationDefaults, type PlanPeriod, type CompletionPeriod } from '@shared/tasks/views'
 import type { RescheduleItem, TaskListQuery } from '../../lib/api-client'
 import { errorMessage } from '../../lib/api-client'
 import { cx } from '../../lib/cx'
 import { useDayNote, useSaveDayNote, useSettings, useUpdateSettings } from '../../hooks/use-settings'
 import { useProjectActions, useProjects } from '../../hooks/use-projects'
 import { useTaskActions, useTaskList } from '../../hooks/use-tasks'
+import { useFocusActions, useTodayFocus } from '../../hooks/use-focus'
 import { IconAlert, IconInfo } from '../common/Icons'
-import { QuickAddBox } from './QuickAddBox'
+import { TaskComposer } from './TaskComposer'
+import { TimerControls } from '../timer/TimerControls'
 import { TaskRow } from './TaskRow'
+import { TaskDetailForm } from './TaskDetailForm'
+import { ProjectMenu, type ProjectMenuTarget } from './ProjectMenu'
 import { ProjectPanel } from './ProjectPanel'
-import { STATUS_FILTER_TEXT, STATUS_FILTER_HINT, SORT_TEXT } from './labels'
+import { ProjectSortableList } from './ProjectSortableList'
+import { SORT_TEXT } from './labels'
 import './tasks.css'
 
-type View = 'today' | 'week' | 'project' | 'all'
-
-const VIEWS: readonly { readonly value: View; readonly label: string }[] = [
-  { value: 'today', label: '今日' },
-  { value: 'week', label: '本周' },
-  { value: 'project', label: '项目' },
-  { value: 'all', label: '全部' },
+type View = 'focus' | 'important' | 'planned' | 'completed' | 'project' | 'all'
+const SMART_VIEWS = [
+  { value: 'focus', label: '我的一天', glyph: '☀' },
+  { value: 'important', label: '重要', glyph: '☆' },
+  { value: 'planned', label: '计划', glyph: '▦' },
+  { value: 'all', label: '全部任务', glyph: '☷' },
+] as const
+const VIEW_TITLES: Record<View, string> = {
+  focus: '我的一天', important: '重要', planned: '计划', completed: '已完成', project: '项目任务', all: '全部任务',
+}
+const PLAN_PERIODS: { value: PlanPeriod; label: string }[] = [
+  { value: 'scheduled', label: '已安排' }, { value: 'overdue', label: '逾期 / 待调整' },
+  { value: 'today', label: '今天' }, { value: 'week', label: '本周' },
+  { value: 'later', label: '以后' }, { value: 'unscheduled', label: '未安排' },
 ]
-
-/**
- * 撤销窗口（FR3：**30 秒是界面提示时长，不是服务端能力边界**）。
- *
- * 服务端可以撤销任何批次（ADR-017 §8：**不做 30 秒窗口的服务端强制**）。
- * 窗口在这里是纯 UI 状态——因此它天然可测，而服务端窗口会让撤销变成不可测试的。
- */
 const UNDO_WINDOW_MS = 30_000
 
-/**
- * 任务页（阶段 4）。
- *
- * ## 两件事写在了结构里，而不是注释里
- *
- * 1. **`today` 一律取服务端响应里的那个**（ADR-015 §6）。本页面自己不算「今天」，
- *    它把 `today` 从 `/api/tasks` 的响应里取出来，用于**展示与档位**；
- *    凡是要回传给服务端的东西（勾选、完成、顺延）用的都是**行上的既有值**
- *    （`occurrenceKey`、用户选的绝对日期），没有一处经过本地时钟。
- * 2. **排序与筛选不在这里重写**（ADR-015 §7）：`queryItems` 与 `sortItems`
- *    都是 `shared/tasks` 的纯函数，服务端用的是同一份。
- */
 export function TasksPage() {
-  const [view, setView] = useState<View>('today')
+  const [projectMenu, setProjectMenu] = useState<ProjectMenuTarget | null>(null)
+  const closeProjectMenu = useCallback(() => setProjectMenu(null), [])
+  const [view, setView] = useState<View>('focus')
+  const [planPeriod, setPlanPeriod] = useState<PlanPeriod>('scheduled')
+  const [completionPeriod, setCompletionPeriod] = useState<CompletionPeriod>('all')
   const [sortMode, setSortMode] = useState<SortMode>('smart')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter | 'default'>('default')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [selectedProject, setSelectedProject] = useState<string | null>(null)
+  const [selectionMode, setSelectionMode] = useState(false)
   const [selection, setSelection] = useState<readonly string[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
   const [batchDate, setBatchDate] = useState('')
   const [banner, setBanner] = useState<{ tone: 'info' | 'error'; text: string } | null>(null)
   const [undoState, setUndoState] = useState<{ batchId: string; title: string } | null>(null)
-
+  const [panelMode, setPanelMode] = useState<'overview' | 'create' | 'projects' | 'note' | 'settings'>('overview')
   const projectsApi = useProjects()
   const projectActions = useProjectActions()
   const actions = useTaskActions()
-
-  // 项目视图的默认打开对象 = 当前项目（ADR-016 §4 的三个用途之一）
-  const effectiveProject = selectedProject ?? projectsApi.currentProjectId
-  useEffect(() => {
-    if (selectedProject === null && projectsApi.currentProjectId !== null) {
-      setSelectedProject(projectsApi.currentProjectId)
-    }
-  }, [selectedProject, projectsApi.currentProjectId])
-
-  /** 项目视图但没选中项目——此时不渲染清单（见下面那条说明） */
-  const projectUnselected = view === 'project' && effectiveProject === null
-
-  const listQuery: TaskListQuery = useMemo(() => {
-    if (view === 'week') return { scope: 'week' }
-    if (view === 'project' && effectiveProject !== null) {
-      return { scope: 'project', projectId: effectiveProject }
-    }
-    return { scope: view === 'today' ? 'today' : 'all' }
-  }, [view, effectiveProject])
-
+  const focus = useTodayFocus()
+  const focusActions = useFocusActions()
+  const effectiveProject = selectedProject
+  const currentProject = projectsApi.projects.find((project) => project.projectId === effectiveProject)
+  const projectUnselected = view === 'project' && currentProject === undefined
+  const listQuery: TaskListQuery = view === 'completed' ? { scope: 'completed' }
+    : view === 'project' && effectiveProject !== null ? { scope: 'project', projectId: effectiveProject } : { scope: 'all' }
   const list = useTaskList(listQuery)
+  // 一次读取历史轮次，避免逐条请求详情；其他视图不额外查询完成历史。
+  const history = useTaskList({ scope: 'completed' }, { enabled: view === 'focus' })
   const { today } = list
+  const refreshList = list.refetch
+  const refreshHistory = history.refetch
+  const historyReady = history.today === today
+  const dayReady = today !== null && focus.dayKey === today
+  const focusKeys = useMemo(() => new Set(dayReady ? focus.items.map(itemKey) : []), [dayReady, focus.items])
+  const currentKeys = useMemo(() => new Set(list.items.map(itemKey)), [list.items])
+  const myDayItems = useMemo(() => [...list.items, ...(historyReady ? history.items.filter((item) => !currentKeys.has(itemKey(item))) : [])]
+    .filter((item) => focusKeys.has(itemKey(item)) && item.status !== 'abandoned'), [list.items, history.items, historyReady, currentKeys, focusKeys])
 
-  const projectInterval = useMemo(() => {
-    if (listQuery.scope !== 'project') return null
-    const row = projectsApi.projects.find((project) => project.projectId === listQuery.projectId)
-    if (row === undefined) return null
-    return { startsOn: row.startsOn, endsOn: row.endsOn }
-  }, [listQuery, projectsApi.projects])
+  useEffect(() => {
+    if (today !== null && focus.dayKey !== null && focus.dayKey !== today) {
+      refreshList()
+      void focus.refetch()
+    }
+  }, [today, focus.dayKey, focus.refetch, refreshList])
+  useEffect(() => {
+    if (view === 'focus' && today !== null && history.today !== null && !historyReady) {
+      refreshHistory()
+      refreshList()
+    }
+  }, [view, today, history.today, historyReady, refreshHistory, refreshList])
 
-  /**
-   * 筛选与排序 —— **判据只在 `shared/tasks`**。
-   *
-   * 默认视图（`statusFilter === 'default'`）的语义见 `filter.ts`：排除已放弃、
-   * **保留已完成**（今天做完的仍要留在视野里，ADR-015 §3 D/F）。
-   * 项目视图的区间分组（`outside_project_range`）也由它标注，界面据此分组。
-   */
   const visible = useMemo(() => {
-    if (today === null) return []
-    const filtered = queryItems(list.items, {
-      status: statusFilter === 'default' ? null : statusFilter,
-      ...(projectInterval === null ? {} : { projectInterval }),
+    if (today === null || projectUnselected) return []
+    if (view === 'completed') return list.items.filter((item) => matchesCompletionPeriod(item, completionPeriod, today))
+    if (view === 'focus') return sortItems(myDayItems, today, sortMode)
+    const source = list.items.map((item) => upcomingTaskItem(item, today))
+    const filtered = queryItems(source, {
+      status: view === 'all' || view === 'project' ? statusFilter : 'active',
+      ...(view === 'project' && currentProject !== undefined ? {
+        scope: { kind: 'project' as const, projectId: currentProject.projectId },
+        projectInterval: { startsOn: currentProject.startsOn, endsOn: currentProject.endsOn },
+      } : {}),
     })
-    return sortItems(filtered, today, sortMode)
-  }, [list.items, today, statusFilter, projectInterval, sortMode])
+    return sortItems(filtered.filter((item) => view === 'important' ? item.importance === 'high'
+      : view === 'planned' ? matchesPlanPeriod(item, planPeriod, today) : true), today, sortMode)
+  }, [today, projectUnselected, view, list.items, completionPeriod, myDayItems, sortMode, statusFilter, currentProject, planPeriod])
 
-  const inRange = visible.filter((item) => !item.reasons.includes('outside_project_range'))
-  const outsideRange = visible.filter((item) => item.reasons.includes('outside_project_range'))
-
+  const canCreate = view !== 'completed' && !projectUnselected && !(view === 'planned' && planPeriod === 'overdue')
+  const expandedItem = visible.find((item) => itemKey(item) === expanded) ?? null
+  const pendingItems = visible.filter((item) => item.completedAt === null && item.status !== 'abandoned')
+  const inRange = pendingItems.filter((item) => !item.reasons.includes('outside_project_range'))
+  const outsideRange = pendingItems.filter((item) => item.reasons.includes('outside_project_range'))
+  const doneItems = visible.filter((item) => item.completedAt !== null && item.status !== 'abandoned')
+  const abandonedItems = visible.filter((item) => item.status === 'abandoned')
   const selectedItems = visible.filter((item) => selection.includes(item.taskId))
-  /**
-   * 顺延的合法性判据只在 `shared/tasks/state.ts`（`canRescheduleTask`：**重复任务一律拒绝**）。
-   * 这里用 `recurring` 是因为 `TodoItem` 只带这个布尔量（明细页有完整 `Task`，
-   * 那里调的是 `canRescheduleTask` 本身）——两者是同一个判据的两种可用输入，不是两份规则。
-   */
   const recurringSelected = selectedItems.filter((item) => item.recurring)
+  const progressTotal = myDayItems.length
+  const progressCompleted = myDayItems.filter((item) => item.completedAt !== null).length
+  const isReading = list.isLoading || today === null || (view === 'focus' && (focus.isLoading || history.isLoading || !dayReady || !historyReady))
+  const readError = list.isError ? list.error : view === 'focus' && focus.isError ? focus.error : view === 'focus' && history.isError ? history.error : null
+  const quickContext = view === 'focus' ? { kind: 'my-day' as const }
+    : view === 'important' ? { kind: 'important' as const }
+    : view === 'project' ? { kind: 'project' as const, projectId: effectiveProject ?? undefined, label: currentProject?.name }
+    : view === 'planned' ? { kind: 'planned' as const, planPeriod, ...(today === null ? {} : planCreationDefaults(planPeriod, today)), label: PLAN_PERIODS.find((option) => option.value === planPeriod)?.label }
+    : { kind: 'all' as const }
 
+  function changeView(next: View, projectId?: string): void {
+    setView(next)
+    setSelectionMode(false)
+    if (projectId !== undefined) setSelectedProject(projectId)
+    setStatusFilter(next === 'project' ? 'active' : 'all')
+    setSelection([])
+    setExpanded(null)
+    setBanner(null)
+    setPanelMode('overview')
+  }
   function toggleSelect(taskId: string): void {
-    setSelection((previous) =>
-      previous.includes(taskId) ? previous.filter((id) => id !== taskId) : [...previous, taskId],
-    )
+    setSelection((previous) => previous.includes(taskId) ? previous.filter((id) => id !== taskId) : [...previous, taskId])
+  }
+  function toggleFocus(item: TodoItem): void {
+    const removing = focusKeys.has(itemKey(item))
+    const mutation = removing ? focusActions.remove : focusActions.add
+    mutation.mutate({ taskId: item.taskId, occurrenceKey: item.occurrenceKey }, {
+      onSuccess: () => setBanner({ tone: 'info', text: removing ? '已移出我的一天，任务仍保留在原处。' : '已加入我的一天。' }),
+      onError: (cause) => setBanner({ tone: 'error', text: errorMessage(cause) }),
+    })
+  }
+  function renderRows(items: readonly TodoItem[]) {
+    return <ul className="ta-tasks__list">{items.map((item) => <TaskRow
+      key={itemKey(item)} item={item} today={today!} projects={projectsApi.projects} actions={actions}
+      selectionMode={selectionMode} selected={selection.includes(item.taskId)} onToggleSelect={toggleSelect}
+      expanded={expanded === itemKey(item)} onToggleExpand={() => { setExpanded(expanded === itemKey(item) ? null : itemKey(item)); setPanelMode('overview') }}
+      onDeleted={(input) => setUndoState({ batchId: input.batchId, title: input.title })}
+      focused={focusKeys.has(itemKey(item))} onToggleFocus={() => toggleFocus(item)}
+      focusBusy={focusActions.add.isPending || focusActions.remove.isPending || !dayReady}
+    />)}</ul>
+  }
+  function renderHistoryRows(items: readonly TodoItem[]) {
+    return <ul className="ta-tasks__list">{items.map((item) => <li className="ta-tasks__row ta-tasks__historyEntry" key={itemKey(item)} data-task-id={item.taskId} data-occurrence-key={item.occurrenceKey}>
+      <span className="ta-tasks__historicalMark" aria-hidden="true">✓</span>
+      <div className="ta-tasks__rowBody"><strong>{item.title}</strong><p className="ta-tasks__meta">
+        <span>完成于 {item.completedDayKey}</span>{item.recurring ? <span>原计划 {item.occurrenceKey}</span> : null}
+        {item.status === 'abandoned' ? <span>任务已放弃 · 此次完成仍保留</span> : null}
+      </p><TimerControls taskId={item.taskId} occurrenceKey={item.occurrenceKey} completed compact/></div>
+      <button type="button" className="ta-btn ta-btn--ghost ta-btn--sm" onClick={() => { setExpanded(itemKey(item)); setPanelMode('overview') }}>详情</button>
+      <button type="button" className="ta-btn ta-btn--ghost ta-btn--sm" disabled={actions.uncomplete.isPending}
+        onClick={() => actions.uncomplete.mutate({ taskId: item.taskId, occurrenceKey: item.occurrenceKey }, { onError: (cause) => setBanner({ tone: 'error', text: errorMessage(cause) }) })}>取消这次完成</button>
+    </li>)}</ul>
   }
 
   /**
@@ -145,7 +187,7 @@ export function TasksPage() {
       if (item.recurring) {
         setBanner({
           tone: 'error',
-          text: `《${item.title}》是重复任务，日期由规则决定，不能顺延——服务端会整批拒绝（409）。请先取消选中它。`,
+          text: `《${item.title}》是重复任务，请取消选中后再批量顺延。`,
         })
         return
       }
@@ -166,7 +208,7 @@ export function TasksPage() {
     actions.reschedule.mutate(items, {
       onSuccess: (payload) => {
         setSelection([])
-        setBanner({ tone: 'info', text: `已顺延 ${payload.tasks.length} 条（同一个批次，可一次撤销）。` })
+        setBanner({ tone: 'info', text: `已顺延 ${payload.tasks.length} 条。` })
       },
       onError: (cause) => setBanner({ tone: 'error', text: errorMessage(cause) }),
     })
@@ -202,284 +244,95 @@ export function TasksPage() {
   }, [undoState])
 
   return (
-    <>
-      <section className="ta-card ta-tasks__head" aria-labelledby="tasks-heading">
-        <p className="ta-tasks__eyebrow ta-mono">TASKS</p>
-        <h1 className="ta-tasks__heading" id="tasks-heading">
-          任务
-        </h1>
-        <p className="ta-tasks__subtitle">
-          「今天」由服务端按账号的时区与日界算出并回带。界面不自己算它——
-          跨零点或跨日界的那一刻，两端会算出不同日期，而那个错误<strong>没有任何报错</strong>。
-        </p>
-        {/*
-          这一行就是 ADR-017 §10 末段要的东西：显示响应里的 `today`。
-          重取解决的是「列表过期」，显示 `today` 解决的是「用户不知道自己看的是哪一天」。
-        */}
-        <p className="ta-tasks__todayLine">
-          今天是{' '}
-          <span className="ta-mono ta-tasks__today" data-testid="server-today">
-            {today ?? '正在读取…'}
-          </span>
-          {view === 'week' && today !== null ? (
-            <span className="ta-tasks__metaItem">
-              本周 {formatDayKey(weekStart(today))} – {formatDayKey(weekEnd(today))}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className="ta-btn ta-btn--ghost ta-btn--sm"
-            onClick={list.refetch}
-          >
-            重新读取
-          </button>
-        </p>
-      </section>
-
-      <QuickAddBox />
-
-      <section className="ta-card ta-tasks__board" aria-labelledby="task-list-heading">
-        <h2 className="ta-tasks__sectionHeading" id="task-list-heading">
-          清单
-        </h2>
-
-        <div className="ta-tasks__toolbar">
-          <div className="ta-tasks__tabs" role="tablist" aria-label="视图">
-            {VIEWS.map((option) => (
-              <button
-                type="button"
-                role="tab"
-                key={option.value}
-                aria-selected={view === option.value}
-                className={cx('ta-tasks__tab', view === option.value && 'ta-tasks__tab--on')}
-                onClick={() => {
-                  setView(option.value)
-                  setSelection([])
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-
-          <label className="ta-tasks__control">
-            <span className="ta-field__label">排序</span>
-            <select
-              className="ta-input ta-tasks__select"
-              value={sortMode}
-              onChange={(event) => setSortMode(event.target.value as SortMode)}
-            >
-              {(Object.keys(SORT_TEXT) as SortMode[]).map((mode) => (
-                <option value={mode} key={mode}>
-                  {SORT_TEXT[mode]}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="ta-tasks__control">
-            <span className="ta-field__label">状态</span>
-            <select
-              className="ta-input ta-tasks__select"
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value as StatusFilter | 'default')
-              }
-              aria-label="状态筛选"
-            >
-              <option value="default">默认（不含已放弃）</option>
-              {(Object.keys(STATUS_FILTER_TEXT) as StatusFilter[]).map((value) => (
-                <option value={value} key={value}>
-                  {STATUS_FILTER_TEXT[value]}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {view === 'project' ? (
-            <label className="ta-tasks__control">
-              <span className="ta-field__label">项目</span>
-              <select
-                className="ta-input ta-tasks__select"
-                value={effectiveProject ?? ''}
-                onChange={(event) => {
-                  setSelectedProject(event.target.value === '' ? null : event.target.value)
-                  setSelection([])
-                }}
-                aria-label="查看哪个项目"
-              >
-                <option value="">（未选择）</option>
-                {projectsApi.active.map((project) => (
-                  <option value={project.projectId} key={project.projectId}>
-                    {project.name}
-                    {project.projectId === projectsApi.currentProjectId ? '（当前）' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+    <div className="ta-tasks__workspace ta-tasks__workspace--detail">
+      {projectMenu === null ? null : <ProjectMenu key={projectMenu.project.projectId} target={projectMenu} actions={projectActions} onClose={closeProjectMenu} onArchived={(id) => { if (selectedProject === id) { setView('all'); setSelectedProject(null); setExpanded(null) } }}/> }
+      <aside className="ta-tasks__sidebar" aria-label="待办导航">
+        <div className="ta-tasks__sidebarTop"><span className="ta-tasks__sidebarMark" aria-hidden="true">✓</span><div><strong>计划待办</strong></div></div>
+        <p className="ta-tasks__navLabel">智能视图</p>
+        <nav className="ta-tasks__sideNav" aria-label="智能视图">{SMART_VIEWS.map((option) => <button key={option.value} type="button"
+          className={cx('ta-tasks__sideItem', view === option.value && 'ta-tasks__sideItem--on')}
+          aria-current={view === option.value ? 'page' : undefined} onClick={() => changeView(option.value)}>
+          <span className="ta-tasks__sideGlyph" aria-hidden="true">{option.glyph}</span><span>{option.label}</span>
+        </button>)}</nav>
+        <p className="ta-tasks__navLabel">我的项目</p>
+        <nav className="ta-tasks__projectNav" aria-label="我的项目">
+          <ProjectSortableList projects={projectsApi.active} selectedId={view === 'project' ? effectiveProject : null}
+            onSelect={(id) => changeView('project', id)} onReorder={projectActions.reorder.mutateAsync} onProjectMenu={(project, anchor) => setProjectMenu({ project, anchor })}/>
+          {projectsApi.isError ? <p className="ta-field__hint" role="alert">项目读取失败，请刷新重试。</p> : null}
+          <button type="button" className="ta-tasks__sideItem ta-tasks__sideItem--subtle" onClick={() => { setExpanded(null); setPanelMode('projects') }}><span aria-hidden="true">＋</span><span>管理项目</span></button>
+        </nav>
+        <p className="ta-tasks__navLabel">记录</p>
+        <button type="button" className={cx('ta-tasks__sideItem', view === 'completed' && 'ta-tasks__sideItem--on')} aria-current={view === 'completed' ? 'page' : undefined} onClick={() => changeView('completed')}><span className="ta-tasks__sideGlyph" aria-hidden="true">✓</span><span>已完成</span></button>
+        <div className="ta-tasks__sidebarBottom">
+          <button type="button" className="ta-tasks__sideItem ta-tasks__sideItem--subtle" onClick={() => { setExpanded(null); setPanelMode('note') }}>每日备注</button>
+          <button type="button" className="ta-tasks__sideItem ta-tasks__sideItem--subtle" onClick={() => { setExpanded(null); setPanelMode('settings') }}>日界设置</button>
         </div>
-
-        <p className="ta-field__hint">{STATUS_FILTER_HINT}</p>
-
-        {/*
-          项目视图但没选中任何项目时，<strong>不能</strong>退回「全部」——
-          那样标签页写着「项目」而列出的是全部任务，是一件说了假话的界面。
-          这里改成交代清楚「先选一个项目」，并且<strong>不渲染清单</strong>。
-        */}
-        {projectUnselected ? (
-          <p className="ta-banner ta-banner--info" role="status">
-            <IconInfo size={18} />
-            <span>
-              还没有当前项目——请在上面选一个（或先在「项目」卡片里建一个）。
-              项目视图是归属判定（`projectId === 项目`），不是区间判定：
-              被排到项目区间之外的任务<strong>仍然会出现</strong>在项目清单里，
-              只是被归到「区间外」那一组并注明原因。
-            </span>
-          </p>
-        ) : null}
-
-        {selection.length > 0 ? (
-          <div className="ta-tasks__batch" role="group" aria-label="批量顺延">
-            <span className="ta-tasks__batchCount">已选中 {selection.length} 条</span>
-            <label className="ta-tasks__control">
-              <span className="ta-field__label">顺延到</span>
-              <input
-                className="ta-input ta-tasks__select"
-                type="date"
-                value={batchDate}
-                onChange={(event) => setBatchDate(event.target.value)}
-                aria-label="顺延到"
-              />
-            </label>
-            <button
-              type="button"
-              className="ta-btn ta-btn--secondary ta-btn--sm"
-              onClick={runBatchReschedule}
-              disabled={batchDate === '' || actions.reschedule.isPending}
-            >
-              {actions.reschedule.isPending ? '正在顺延…' : '顺延'}
-            </button>
-            <button
-              type="button"
-              className="ta-btn ta-btn--ghost ta-btn--sm"
-              onClick={() => setSelection([])}
-            >
-              取消选择
-            </button>
-            {recurringSelected.length > 0 ? (
-              <span className="ta-field__hint">（其中 {recurringSelected.length} 条是重复任务）</span>
-            ) : null}
+      </aside>
+      <div className="ta-tasks__center">
+        <label className="ta-tasks__viewPicker">查看
+          <select className="ta-input" aria-label="切换任务视图" value={view === 'project' ? `project:${effectiveProject}` : view}
+            onChange={(event) => event.target.value.startsWith('project:') ? changeView('project', event.target.value.slice(8)) : changeView(event.target.value as View)}>
+            <optgroup label="智能视图">{SMART_VIEWS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>
+            <optgroup label="我的项目">{projectsApi.active.map((project) => <option key={project.projectId} value={`project:${project.projectId}`}>{project.name}</option>)}</optgroup>
+            <optgroup label="记录"><option value="completed">已完成</option></optgroup>
+          </select>
+        </label>
+        <section className="ta-tasks__head" aria-labelledby="tasks-heading">
+          <h1 className="ta-tasks__heading" id="tasks-heading">{view === 'project' ? currentProject?.name ?? '选择项目' : VIEW_TITLES[view]}</h1>
+          <div className="ta-tasks__todayLine"><time data-testid="server-today">{today ?? '正在读取日期…'}</time>
+            <button type="button" className="ta-btn ta-btn--ghost ta-btn--sm" onClick={() => { list.refetch(); if (view === 'focus') { history.refetch(); void focus.refetch() } }}>刷新</button>
+            {canCreate ? <button type="button" className="ta-btn ta-btn--primary ta-btn--sm ta-tasks__newButton" onClick={() => { setExpanded(null); setPanelMode('create') }}>＋ 新建任务</button> : null}
+            {view === 'focus' && dayReady && progressTotal > 0 ? <span className="ta-tasks__compactProgress" aria-label="我的一天进度">已完成 {progressCompleted} / {progressTotal}<progress max={progressTotal} value={progressCompleted}/></span> : null}
           </div>
-        ) : null}
-
-        {banner === null ? null : (
-          <p
-            className={banner.tone === 'error' ? 'ta-banner ta-banner--error' : 'ta-banner ta-banner--info'}
-            role={banner.tone === 'error' ? 'alert' : 'status'}
-            data-testid="board-banner"
-          >
-            {banner.tone === 'error' ? <IconAlert size={18} /> : <IconInfo size={18} />}
-            <span>{banner.text}</span>
-          </p>
-        )}
-
-        {/* 删除可撤销（ADR-017 §8）：窗口只在界面上，服务端能撤销任何批次 */}
-        {undoState === null ? null : (
-          <p className="ta-banner ta-banner--info ta-tasks__undo" role="status">
-            <IconInfo size={18} />
-            <span>已删除《{undoState.title}》。</span>
-            <button
-              type="button"
-              className="ta-btn ta-btn--secondary ta-btn--sm"
-              onClick={runUndo}
-              disabled={actions.undo.isPending}
-              data-testid="undo-delete"
-            >
-              撤销（30 秒内）
-            </button>
-          </p>
-        )}
-
-        {projectUnselected ? null : list.isLoading || today === null ? (
-          <p className="ta-tasks__hint">正在读取任务…</p>
-        ) : list.isError ? (
-          <div className="ta-tasks__errorBox">
-            <p className="ta-banner ta-banner--error" role="alert">
-              <IconAlert size={18} />
-              <span>{errorMessage(list.error)}</span>
-            </p>
-            <button type="button" className="ta-btn ta-btn--secondary" onClick={list.refetch}>
-              重试
-            </button>
+        </section>
+        <div className="ta-tasks__mobileTools" aria-label="任务工具">
+          <button type="button" onClick={() => { setExpanded(null); setPanelMode('projects') }}>管理项目</button>
+          <button type="button" onClick={() => { setExpanded(null); setPanelMode('note') }}>今日备注</button>
+          <button type="button" onClick={() => { setExpanded(null); setPanelMode('settings') }}>日界设置</button>
+        </div>
+        {view === 'planned' ? <section className="ta-tasks__planFilter" aria-label="计划时间范围">
+          <div className="ta-tasks__periods" role="group" aria-label="计划时间筛选">{PLAN_PERIODS.map((option) => <button key={option.value} type="button" aria-pressed={planPeriod === option.value}
+            onClick={() => { setPlanPeriod(option.value); setSelection([]); setExpanded(null) }}>{option.label}</button>)}</div>
+          {planPeriod === 'week' && today !== null ? <p className="ta-field__hint">{weekStart(today)} — {weekEnd(today)}</p> : null}
+        </section> : null}
+        <section className="ta-card ta-tasks__board" aria-labelledby="task-list-heading">
+          <div className="ta-tasks__boardHead"><h2 className="ta-tasks__sectionHeading" id="task-list-heading">{view === 'focus' ? '今日任务' : view === 'completed' ? '完成记录' : '任务'}</h2><span className="ta-mono ta-tasks__boardCount">{visible.length} {view === 'completed' ? '次完成' : '项'}</span></div>
+          <div className="ta-tasks__toolbar">
+            {view !== 'completed' && visible.length > 0 ? <button type="button" className="ta-btn ta-btn--ghost ta-btn--sm" aria-pressed={selectionMode} onClick={() => { setSelectionMode(!selectionMode); setSelection([]) }}>{selectionMode ? '退出批量选择' : '批量选择'}</button> : null}
+            {view === 'completed' ? <label className="ta-tasks__control"><span className="ta-field__label">完成时间</span><select className="ta-input" aria-label="完成时间筛选" value={completionPeriod} onChange={(event) => { setCompletionPeriod(event.target.value as CompletionPeriod); setExpanded(null) }}><option value="all">全部时间</option><option value="today">今天</option><option value="week">本周</option></select></label>
+              : <label className="ta-tasks__control"><span className="ta-field__label">排序</span><select className="ta-input ta-tasks__select" aria-label="排序" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>{(Object.keys(SORT_TEXT) as SortMode[]).map((mode) => <option value={mode} key={mode}>{SORT_TEXT[mode]}</option>)}</select></label>}
+            {view === 'all' || view === 'project' ? <label className="ta-tasks__control"><span className="ta-field__label">显示</span><select className="ta-input ta-tasks__select" aria-label="状态筛选" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as StatusFilter); setSelection([]); setExpanded(null) }}><option value="all">所有状态</option><option value="active">未完成</option><option value="completed">已完成</option><option value="abandoned">已放弃</option></select></label> : null}
           </div>
-        ) : visible.length === 0 ? (
-          <p className="ta-tasks__empty">
-            这个视图下没有任务。上面那行输入框可以直接写一条——比如
-            <code className="ta-mono">明天 交报告 @科研</code>。
-          </p>
-        ) : (
-          <>
-            {outsideRange.length > 0 && inRange.length === 0 ? null : (
-              <ul className="ta-tasks__list">
-                {inRange.map((item) => (
-                  <TaskRow
-                    key={`${item.taskId}:${item.occurrenceKey}`}
-                    item={item}
-                    today={today}
-                    projects={projectsApi.projects}
-                    actions={actions}
-                    selected={selection.includes(item.taskId)}
-                    onToggleSelect={toggleSelect}
-                    expanded={expanded === item.taskId}
-                    onToggleExpand={(taskId) => setExpanded(expanded === taskId ? null : taskId)}
-                    onDeleted={(input) => setUndoState({ batchId: input.batchId, title: input.title })}
-                    onNotice={handleNotice}
-                  />
-                ))}
-              </ul>
-            )}
-
-            {/*
-              项目视图的区间分组（ADR-015 §5 / ADR-016 §10 的调和方案）：
-              「归属」与「区间」两件事各自可见，而不是让其中一个悄悄失效。
-              没有这一组，用户会看到一条十月排期的任务出现在九月就结束的项目里，
-              而界面不解释为什么——<strong>看起来像 bug</strong>。
-            */}
-            {outsideRange.length > 0 ? (
-              <div className="ta-tasks__outside">
-                <h3 className="ta-tasks__groupHeading">排期在项目区间之外（仍然属于这个项目）</h3>
-                <ul className="ta-tasks__list">
-                  {outsideRange.map((item) => (
-                    <TaskRow
-                      key={`${item.taskId}:${item.occurrenceKey}`}
-                      item={item}
-                      today={today}
-                      projects={projectsApi.projects}
-                      actions={actions}
-                      selected={selection.includes(item.taskId)}
-                      onToggleSelect={toggleSelect}
-                      expanded={expanded === item.taskId}
-                      onToggleExpand={(taskId) => setExpanded(expanded === taskId ? null : taskId)}
-                      onDeleted={(input) =>
-                        setUndoState({ batchId: input.batchId, title: input.title })
-                      }
-                      onNotice={handleNotice}
-                    />
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </>
-        )}
-      </section>
-
-      <ProjectPanel projectsApi={projectsApi} projectActions={projectActions} />
-      <DayNoteCard dayKey={today} />
-      <SettingsCard />
-    </>
+          {projectUnselected ? <p className="ta-tasks__empty">请选择或新建项目。</p> : null}
+          {selection.length > 0 ? <div className="ta-tasks__batch" role="group" aria-label="批量顺延"><span>已选中 {selection.length} 条</span><label className="ta-tasks__control"><span className="ta-field__label">顺延到</span><input type="date" className="ta-input" aria-label="顺延到" value={batchDate} onChange={(event) => setBatchDate(event.target.value)}/></label><button type="button" className="ta-btn ta-btn--secondary ta-btn--sm" disabled={batchDate === '' || actions.reschedule.isPending} onClick={runBatchReschedule}>顺延</button><button type="button" className="ta-btn ta-btn--ghost ta-btn--sm" onClick={() => { setSelection([]); setSelectionMode(false) }}>取消选择</button>{recurringSelected.length > 0 ? <span className="ta-field__hint">重复任务按规则安排，不能批量顺延。</span> : null}</div> : null}
+          {banner === null ? null : <p className={banner.tone === 'error' ? 'ta-banner ta-banner--error' : 'ta-banner ta-banner--info'} role={banner.tone === 'error' ? 'alert' : 'status'} data-testid="board-banner">{banner.tone === 'error' ? <IconAlert size={18}/> : <IconInfo size={18}/>}<span>{banner.text}</span></p>}
+          {undoState === null ? null : <p className="ta-banner ta-banner--info ta-tasks__undo" role="status"><span>已删除《{undoState.title}》。</span><button type="button" className="ta-btn ta-btn--secondary ta-btn--sm" onClick={runUndo} disabled={actions.undo.isPending} data-testid="undo-delete">撤销（30 秒内）</button></p>}
+          {readError !== null ? <div className="ta-tasks__errorBox"><p className="ta-banner ta-banner--error" role="alert">{errorMessage(readError)}</p><button type="button" className="ta-btn ta-btn--secondary" onClick={() => { list.refetch(); history.refetch(); void focus.refetch() }}>重试</button></div>
+            : isReading ? <p className="ta-tasks__hint">正在读取任务…</p>
+              : projectUnselected ? null : visible.length === 0 ? <p className="ta-tasks__empty">{view === 'focus' ? '暂无任务。' : view === 'completed' ? '暂无完成记录。' : view === 'important' ? '暂无重要任务。' : '暂无任务。'}</p>
+                : view === 'completed' ? renderHistoryRows(visible) : <>
+                  {inRange.length > 0 ? renderRows(inRange) : null}
+                  {outsideRange.length > 0 ? <div className="ta-tasks__group"><h3 className="ta-tasks__groupHeading">项目周期之外 <span>{outsideRange.length}</span></h3>{renderRows(outsideRange)}</div> : null}
+                  {doneItems.length > 0 ? <details className="ta-tasks__completedGroup" open={view === 'focus' || statusFilter === 'completed'}><summary>已完成 · {doneItems.length}</summary>{renderRows(doneItems)}</details> : null}
+                  {abandonedItems.length > 0 ? <details className="ta-tasks__completedGroup" open={statusFilter === 'abandoned'}><summary>已放弃 · {abandonedItems.length}</summary>{renderRows(abandonedItems)}</details> : null}
+                </>}
+        </section>
+      </div>
+      <aside className={cx('ta-tasks__right', (expandedItem !== null || panelMode !== 'overview') && 'ta-tasks__right--detail')} aria-label="任务详情与辅助信息">
+        <div className="ta-tasks__rightHead"><span>{expandedItem === null ? ({ overview: canCreate ? '新建任务' : '任务详情', create: '新建任务', projects: '管理项目', note: '今日备注', settings: '日界设置' } as const)[panelMode] : '编辑任务'}</span>{expandedItem !== null || panelMode !== 'overview' ? <button type="button" aria-label="关闭侧栏" onClick={() => { setExpanded(null); setPanelMode('overview') }}>×</button> : null}</div>
+        {expandedItem !== null && today !== null ? <>
+          <div className="ta-tasks__selectedHeading"><p className="ta-mono">{view === 'completed' ? '完成记录' : isUpcomingPreview(expandedItem, today) ? '下一轮预览' : expandedItem.recurring ? '重复任务' : expandedItem.completedDayKey === null ? '待完成' : '已完成'}</p><h2>{expandedItem.title}</h2><span>{expandedItem.projectId === null ? '未归属项目' : projectsApi.projects.find((project) => project.projectId === expandedItem.projectId)?.name ?? '已删除的项目'}</span>
+          </div>
+          <TaskDetailForm key={itemKey(expandedItem)} item={expandedItem} today={today} projects={projectsApi.projects} actions={actions} onNotice={handleNotice}/>
+        </> : panelMode === 'projects' ? <ProjectPanel projectsApi={projectsApi} projectActions={projectActions} onProjectMenu={(project, anchor) => setProjectMenu({ project, anchor })}/>
+          : panelMode === 'note' ? <DayNoteCard dayKey={today}/>
+            : panelMode === 'settings' ? <SettingsCard/>
+                : canCreate ? <TaskComposer context={quickContext}/> : <p className="ta-tasks__panelEmpty">选择任务查看详情</p>}
+      </aside>
+    </div>
   )
 }
+
 
 /**
  * 每日备注（ADR-017 §1.4 / §6）。
@@ -504,8 +357,7 @@ function DayNoteCard({ dayKey }: { dayKey: DayKey | null }) {
         这一天的备注
       </h2>
       <p className="ta-field__hint">
-        归属日 <span className="ta-mono">{dayKey}</span>
-        ——与打卡无关：没有到达记录的日子也能写。清空内容即删除这条备注。
+        <span className="ta-mono">{dayKey}</span> · 清空后保存可删除备注。
       </p>
       <textarea
         className="ta-input ta-tasks__notes"
@@ -597,10 +449,7 @@ function SettingsCard() {
           </label>
 
           <p className="ta-field__hint" data-testid="settings-affects-from">
-            此设置自 <strong>{formatDayKey(settings.affectsFrom)}</strong>（
-            <span className="ta-mono">{settings.affectsFrom}</span>）起生效，
-            <strong>此前的记录不会改变</strong>：每条记录的归属日在写入时固化，永不重算。
-            时区当前是 <span className="ta-mono">{settings.timeZone}</span>。
+            自 {formatDayKey(settings.affectsFrom)}（{settings.affectsFrom}）起生效，历史记录不变。时区：{settings.timeZone}。
           </p>
           {feedback === null ? null : <p className="ta-field__hint">{feedback}</p>}
         </>

@@ -49,7 +49,7 @@ const LANDMARK: Readonly<Record<RouteName, { selector: string; text: string }>> 
   register: { selector: '#auth-title', text: '注册' },
   home: { selector: '#home-heading', text: '欢迎回来' },
   checkin: { selector: '#checkin-heading', text: '今日打卡' },
-  tasks: { selector: '#tasks-heading', text: '任务' },
+  tasks: { selector: '#tasks-heading', text: '我的一天' },
   invites: { selector: '#invites-heading', text: '邀请码' },
 }
 

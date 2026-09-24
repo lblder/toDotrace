@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { uuidv7 } from '@shared/uuid'
 import { compareDayKey, formatDayKey, weekEnd, weekStart } from '@shared/time'
 import type { DayKey } from '@shared/time'
+import type { ProjectRow } from '../../lib/api-client'
 import { errorMessage } from '../../lib/api-client'
 import { cx } from '../../lib/cx'
 import type { useProjectActions, useProjects } from '../../hooks/use-projects'
@@ -13,24 +14,14 @@ const STATE_TEXT: Readonly<Record<'upcoming' | 'active' | 'ended', string>> = {
   ended: '已结束',
 }
 
-/**
- * 项目面板（ADR-016 / FR2.8）：列表、新建、改期、切换当前项目、取消当前项目。
- *
- * 三条口径在这里必须可见：
- *
- * 1. **「当前项目」绝不参与归属推导**（ADR-016 §4 的禁令）：切换它**不会**改任何任务的
- *    `projectId`。界面因此把它画成一个纯粹的「指针」，并在下面那句话里说明；
- * 2. **「至多一个」而不是「恰好一个」**：一个项目都没有时、或当前项目被删除时，
- *    当前项目必然是 `null`。故「取消当前项目」是一个**必需的**显式动作
- *    （ADR-017 §1.3）——只能被事件推入、不能主动进入的状态没法诚实呈现；
- * 3. **同名项目合法**（ADR-016 §6）：界面按 id 索引，不使用名字做键。
- */
 export function ProjectPanel({
   projectsApi,
   projectActions,
+  onProjectMenu,
 }: {
   projectsApi: ReturnType<typeof useProjects>
   projectActions: ReturnType<typeof useProjectActions>
+  onProjectMenu: (project: ProjectRow, anchor: { x: number; y: number }) => void
 }) {
   const [name, setName] = useState('')
   const [startsOn, setStartsOn] = useState('')
@@ -47,11 +38,11 @@ export function ProjectPanel({
       return
     }
     if (startsOn === '' || endsOn === '') {
-      setFeedback({ tone: 'error', text: '项目的起止日期是必需的——FR2.8 的项目一定有周期。' })
+      setFeedback({ tone: 'error', text: '请选择项目起止日期。' })
       return
     }
     if (compareDayKey(startsOn, endsOn) > 0) {
-      setFeedback({ tone: 'error', text: '开始日期不能晚于结束日期（服务端也会以 400 拒绝）。' })
+      setFeedback({ tone: 'error', text: '开始日期不能晚于结束日期。' })
       return
     }
     projectActions.create.mutate(
@@ -69,16 +60,22 @@ export function ProjectPanel({
     )
   }
 
+  function renderProject(project: ProjectRow) {
+    return <li className="ta-tasks__project" key={project.projectId}
+      onContextMenu={(event) => { event.preventDefault(); onProjectMenu(project, { x: event.clientX, y: event.clientY }) }}>
+      <span className="ta-tasks__projectName">{project.name}</span>
+      <span className="ta-tasks__metaItem ta-mono">{formatDayKey(project.startsOn)} – {formatDayKey(project.endsOn)}</span>
+      <span className="ta-tasks__metaItem">{project.archived ? '已归档' : STATE_TEXT[project.state]}</span>
+      <button type="button" className="ta-projectMore" aria-label={`项目「${project.name}」的操作`} aria-haspopup="menu"
+        onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onProjectMenu(project, { x: rect.right, y: rect.bottom }) }}>⋯</button>
+    </li>
+  }
+
   return (
     <section className="ta-card ta-tasks__projects" aria-labelledby="projects-heading">
       <h2 className="ta-tasks__sectionHeading" id="projects-heading">
         项目
       </h2>
-      <p className="ta-field__hint">
-        周期 = 自建项目：名称 + 起止日期，长短完全自定义（FR2.8）。多个项目可以<strong>重叠</strong>，
-        同名也合法——名字不是标识。切换「当前项目」<strong>不会改任何任务的归属</strong>：
-        归属只由任务自己的 `projectId` 决定。
-      </p>
 
       {projectsApi.isLoading ? (
         <p className="ta-tasks__hint">正在读取项目…</p>
@@ -88,87 +85,14 @@ export function ProjectPanel({
           <span>{errorMessage(projectsApi.error)}</span>
         </p>
       ) : active.length === 0 ? (
-        <p className="ta-tasks__hint">还没有项目。快速录入里的 `#名字` 在项目存在之前不会识别。</p>
+        <p className="ta-tasks__hint">暂无项目。</p>
       ) : (
-        <ul className="ta-tasks__projectList">
-          {active.map((project) => {
-            /*
-             * 状态直接用**服务端算好的** `state`（ADR-016 §4 的派生量）。
-             * 本地再调一次 `projectState` 也得到同一个答案，但那就成了同一件事的
-             * 两个来源——一个走服务端的 `today`、一个走本地的时钟，跨零点时会分叉。
-             */
-            const state = project.state
-            return (
-              <li className="ta-tasks__project" key={project.projectId}>
-                <span className="ta-tasks__projectName">
-                  {project.name}
-                  {project.projectId === projectsApi.currentProjectId ? (
-                    <span className="ta-badge ta-badge--primary">当前</span>
-                  ) : null}
-                </span>
-                <span className="ta-tasks__metaItem ta-mono">
-                  {formatDayKey(project.startsOn)} – {formatDayKey(project.endsOn)}
-                </span>
-                <span className="ta-tasks__metaItem">{STATE_TEXT[state]}</span>
-                <span className="ta-tasks__projectActions">
-                  {project.projectId === projectsApi.currentProjectId ? null : (
-                    <button
-                      type="button"
-                      className="ta-btn ta-btn--ghost ta-btn--sm"
-                      onClick={() =>
-                        projectActions.activate.mutate(project.projectId, {
-                          onError: (cause) =>
-                            setFeedback({ tone: 'error', text: errorMessage(cause) }),
-                        })
-                      }
-                      disabled={projectActions.activate.isPending}
-                    >
-                      设为当前
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="ta-btn ta-btn--ghost ta-btn--sm ta-tasks__danger"
-                    onClick={() =>
-                      projectActions.remove.mutate(project.projectId, {
-                        onSuccess: () =>
-                          setFeedback({
-                            tone: 'info',
-                            text: `已删除项目「${project.name}」。它下面的任务一条都没删，projectId 也一个都没清——那是发生过的事实。`,
-                          }),
-                        onError: (cause) => setFeedback({ tone: 'error', text: errorMessage(cause) }),
-                      })
-                    }
-                    disabled={projectActions.remove.isPending}
-                    aria-label={`删除项目「${project.name}」`}
-                  >
-                    删除
-                  </button>
-                </span>
-              </li>
-            )
-          })}
-        </ul>
+        <ul className="ta-tasks__projectList">{active.map(renderProject)}</ul>
       )}
-
-      {projectsApi.currentProjectId === null ? null : (
-        <div className="ta-tasks__detailActions">
-          <button
-            type="button"
-            className="ta-btn ta-btn--ghost ta-btn--sm"
-            onClick={() =>
-              projectActions.clearCurrent.mutate(undefined, {
-                onSuccess: () =>
-                  setFeedback({ tone: 'info', text: '已取消当前项目（当前项目可以是「没有」）。' }),
-                onError: (cause) => setFeedback({ tone: 'error', text: errorMessage(cause) }),
-              })
-            }
-            disabled={projectActions.clearCurrent.isPending}
-          >
-            取消当前项目
-          </button>
-        </div>
-      )}
+      {projectsApi.projects.some((project) => project.archived) ? <details className="ta-tasks__archivedProjects">
+        <summary>已归档项目</summary>
+        <ul className="ta-tasks__projectList">{projectsApi.projects.filter((project) => project.archived).map(renderProject)}</ul>
+      </details> : null}
 
       <div className="ta-tasks__grid">
         <label className="ta-field">
@@ -204,7 +128,7 @@ export function ProjectPanel({
       </div>
       {startsOn === '' || endsOn === '' ? null : (
         <p className="ta-field__hint">
-          这一段包含 {weekText(startsOn, endsOn)}；区间是<strong>闭区间</strong>，起止两天都算在项目里。
+          {weekText(startsOn, endsOn)}（含起止日）
         </p>
       )}
       <div className="ta-tasks__detailActions">

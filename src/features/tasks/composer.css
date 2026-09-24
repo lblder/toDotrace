@@ -1,0 +1,93 @@
+.ta-composer {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100%;
+  background: var(--c-panel);
+}
+
+.ta-composer__form,
+.ta-composer__body,
+.ta-composer__section {
+  display: flex;
+  flex-direction: column;
+}
+
+.ta-composer__form { flex: 1; min-height: 0; }
+.ta-composer__body { flex: 1; gap: var(--space-4); padding: var(--space-5); }
+.ta-composer .ta-field { min-width: 0; gap: var(--space-2); }
+.ta-composer .ta-field__label { font-size: var(--fs-sm); }
+.ta-composer .ta-field__label small { color: var(--c-ink-faint); font-weight: var(--fw-regular); }
+.ta-composer__titleInput { min-height: 48px; font-size: var(--fs-base); }
+.ta-composer__notes { min-height: 76px; padding: var(--space-3); resize: vertical; line-height: var(--lh-base); }
+
+.ta-composer .ta-tasks__preview {
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-color: var(--c-border);
+  background: var(--c-bg-sunken);
+}
+
+.ta-composer .ta-tasks__previewTitle { font-size: var(--fs-sm); }
+.ta-composer .ta-tasks__chips { gap: var(--space-1); }
+
+.ta-composer__examples {
+  color: var(--c-ink-faint);
+  font-size: 11px;
+  line-height: var(--lh-base);
+}
+
+.ta-composer__examples summary { width: fit-content; cursor: pointer; }
+.ta-composer__examples p { margin: var(--space-2) 0 0; }
+.ta-composer__examples code { color: var(--c-ink-muted); }
+
+.ta-composer__hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--c-primary);
+  color: var(--c-ink-muted);
+  background: var(--c-primary-soft);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+}
+
+.ta-composer__section {
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--c-border);
+}
+
+.ta-composer__sectionHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  color: var(--c-ink);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.ta-composer__sectionHead small { color: var(--c-ink-faint); font-size: 11px; font-weight: var(--fw-regular); }
+.ta-composer__segments { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--c-border); border-radius: var(--radius-md); background: var(--c-bg-sunken); }
+.ta-composer__segment { min-height: 34px; padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--c-ink-muted); font-size: var(--fs-sm); cursor: pointer; }
+.ta-composer__segment:hover { color: var(--c-ink); background: var(--c-panel); }
+.ta-composer__segment--active,
+.ta-composer__segment--active:hover { color: var(--c-primary-text); background: var(--c-primary-soft); font-weight: var(--fw-semibold); }
+
+.ta-composer__recurrence { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: var(--space-3); border-radius: var(--radius-sm); color: var(--c-ink); background: var(--c-primary-soft); font-size: var(--fs-sm); }
+.ta-composer__recurrence small { color: var(--c-ink-muted); line-height: var(--lh-snug); }
+
+.ta-composer__pomodoro { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--c-border); border-radius: var(--radius-md); background: var(--c-bg-sunken); cursor: pointer; }
+.ta-composer__pomodoro input { flex: none; margin-top: 3px; accent-color: var(--c-primary); }
+.ta-composer__pomodoro span { display: flex; flex-direction: column; gap: 3px; }
+.ta-composer__pomodoro strong { color: var(--c-ink); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.ta-composer__pomodoro small { color: var(--c-ink-muted); font-size: 11px; line-height: var(--lh-snug); }
+
+.ta-composer__retry { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.ta-composer__footer { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-top: 1px solid var(--c-border); background: var(--c-panel); }
+.ta-composer__footer .ta-btn { flex: 1; }
+.ta-composer__footer small { flex: 1; color: var(--c-ink-faint); font-size: 11px; }
+
+@media (max-width: 640px) {
+  .ta-composer__body { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .ta-composer__footer { padding-left: var(--space-4); padding-right: var(--space-4); }
+}

@@ -1,0 +1,163 @@
+.ta-timer__settings {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  background: var(--c-panel-raised);
+}
+
+.ta-timer__note {
+  margin: var(--space-1) 0 0;
+  color: var(--c-ink-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+}
+
+.ta-timer__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  color: var(--c-ink);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.ta-timer__toggle input { accent-color: var(--c-primary); }
+.ta-timer__toggle:has(input:disabled) { color: var(--c-ink-faint); cursor: not-allowed; }
+
+.ta-timer__controls {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ta-timer__readout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ta-timer__caption {
+  color: var(--c-ink-muted);
+  font-size: var(--fs-xs);
+}
+
+.ta-timer__digits {
+  color: var(--c-ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-tight);
+}
+
+.ta-timer__running {
+  color: var(--c-primary-text);
+  font-size: var(--fs-xs);
+}
+
+.ta-timer__interval {
+  height: 5px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--c-bg-sunken);
+}
+
+.ta-timer__interval > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--c-primary);
+  transition: width 1s linear;
+}
+
+.ta-timer__buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ta-timer__reminder {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--c-primary);
+  border-radius: var(--radius-xs);
+  background: var(--c-primary-soft);
+  color: var(--c-primary-text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+}
+
+.ta-timer__error {
+  margin: 0;
+  color: var(--c-overdue-text);
+  font-size: var(--fs-xs);
+}
+
+.ta-timer__error button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ta-timer__controls--compact {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  max-width: 100%;
+}
+
+.ta-timer__controls--compact .ta-timer__readout { align-items: center; gap: var(--space-1); }
+.ta-timer__controls--compact .ta-timer__glyph { color: var(--c-primary-text); font-size: var(--fs-lg); }
+.ta-timer__controls--compact .ta-timer__digits { font-size: var(--fs-xs); }
+.ta-timer__controls--compact .ta-timer__running { display: none; }
+.ta-timer__controls--compact .ta-timer__buttons .ta-btn { padding: 3px 6px; font-size: var(--fs-xs); }
+.ta-timer__interval--compact { width: 42px; height: 3px; flex: none; }
+.ta-timer__reminder--compact {
+  padding: 2px 5px;
+  border-left: 0;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.ta-timer__dock {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  right: var(--space-5);
+  bottom: var(--space-5);
+  display: grid;
+  gap: var(--space-3);
+  width: min(360px, calc(100vw - 32px));
+  padding: var(--space-4);
+  border: 1px solid var(--c-primary);
+  border-radius: var(--radius-lg);
+  background: var(--c-panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.ta-timer__dockHeader { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.ta-timer__dockHeader span { color: var(--c-primary-text); font-size: var(--fs-xs); }
+.ta-timer__dockHeader small { color: var(--c-ink-faint); font-family: var(--font-mono); }
+.ta-timer__dockTitle { margin: 0; color: var(--c-ink); font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+.ta-timer__dock .ta-timer__digits { font-size: var(--fs-2xl); }
+
+.ta-timer__controls :is(button, input):focus-visible,
+.ta-timer__settings :is(button, input):focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+
+@media (max-width: 40rem) {
+  .ta-timer__dock { right: var(--space-4); bottom: var(--space-4); }
+  .ta-timer__dock--tasks { bottom: calc(64px + var(--space-4)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ta-timer__interval > span { transition: none; }
+}

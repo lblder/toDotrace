@@ -38,6 +38,8 @@ export function useUpdateSettings() {
       // 响应就是权威的新值，直接落缓存；再作废任务列表——归属日可能已经变了
       queryClient.setQueryData(queryKeys.settings, payload)
       void queryClient.invalidateQueries({ queryKey: queryKeys.tasks })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.focus })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.trace })
     },
   })
 }

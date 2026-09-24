@@ -92,8 +92,7 @@ test.describe.serial('打卡链路', () => {
     await expectScreen(checkin, 'checkin')
 
     // 休息日呈现：不是错误态、不是空白，也不带评判（ADR-012 §5 / 01 FR1）
-    await expect(checkin.locator('.ta-checkin__restMain')).toHaveText('今天偷偷懒')
-    await expect(checkin.locator('.ta-checkin__restNote')).toContainText('不计入打卡天数')
+    await expect(checkin.locator('.ta-checkin__restMain')).toHaveText('尚未打卡')
     await expect(checkin.locator('.ta-checkin__streakNumber')).toHaveText('0')
 
     // 休息日正是打卡的起点：按钮就在这儿（02 §3 的流程图）
@@ -166,7 +165,7 @@ test.describe.serial('打卡链路', () => {
     // 闭合之后不再有任何写入入口——本阶段没有撤销（属阶段 5），所以也不摆假按钮
     await expect(checkin.getByRole('button', { name: '离开实验室' })).toHaveCount(0)
     await expect(checkin.getByRole('button', { name: '到达实验室' })).toHaveCount(0)
-    await expect(checkin.locator('.ta-checkin__hint')).toContainText('今天的到达与离开都已记录')
+    await expect(checkin.locator('.ta-checkin__hint')).toContainText('今日打卡已完成')
   })
 
   test('5. 主题切换：印章的颜色跟着令牌走，不是写死的', async () => {

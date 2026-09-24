@@ -9,6 +9,7 @@ import { HomePage } from './features/home/HomePage'
 import { InvitesPage } from './features/invites/InvitesPage'
 import { AppShell } from './features/shell/AppShell'
 import { TasksPage } from './features/tasks/TasksPage'
+import { TracePage } from './features/trace/TracePage'
 import { useRoute } from './hooks/use-route'
 import { useSession } from './hooks/use-session'
 import { useSetupStatus } from './hooks/use-setup'
@@ -26,6 +27,7 @@ const SCREENS: Readonly<Record<RouteName, () => ReactElement | null>> = {
   home: HomePage,
   checkin: CheckinPage,
   tasks: TasksPage,
+  trace: TracePage,
   invites: InvitesPage,
 }
 
@@ -34,6 +36,7 @@ const SHELLED: ReadonlySet<RouteName> = new Set<RouteName>([
   'home',
   'checkin',
   'tasks',
+  'trace',
   'invites',
 ])
 

@@ -10,12 +10,15 @@ import { createErrorHandler, notFoundHandler } from './middleware/error.js'
 import { securityHeaders } from './middleware/security.js'
 import { authRoutes } from './routes/auth.js'
 import { checkinRoutes } from './routes/checkin.js'
+import { focusRoutes } from './routes/focus.js'
 import { inviteRoutes } from './routes/invites.js'
 import { memberRoutes } from './routes/members.js'
 import { projectRoutes } from './routes/projects.js'
 import { settingsRoutes } from './routes/settings.js'
 import { setupRoutes } from './routes/setup.js'
 import { taskRoutes } from './routes/tasks.js'
+import { timerRoutes } from './routes/timer.js'
+import { traceRoutes } from './routes/trace.js'
 import { undoRoutes } from './routes/undo.js'
 
 export interface AppOptions {
@@ -105,6 +108,9 @@ export function createApp(options: AppOptions): Express {
   // 阶段 4（ADR-017 §1）：任务 / 项目 / 设置 / 撤销。**全部需鉴权**，
   // 响应体一律只含当前账号的数据；`accountId` 一律取自 `getAuth(req)`（§5）。
   app.use('/api/tasks', taskRoutes(db, requireAuth))
+  app.use('/api/timer', timerRoutes(db, requireAuth))
+  app.use('/api/focus', focusRoutes(db, requireAuth))
+  app.use('/api/trace', traceRoutes(db, requireAuth))
   app.use('/api/projects', projectRoutes(db, requireAuth))
   app.use('/api/settings', settingsRoutes(db, requireAuth))
   app.use('/api/undo', undoRoutes(db, requireAuth))

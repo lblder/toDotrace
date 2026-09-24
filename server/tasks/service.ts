@@ -4,6 +4,7 @@ import type { DayKey } from '@shared/time'
 import { AnchorInvariantError, nextAnchorDate } from '@shared/recurrence'
 import type { NextAnchorMode, Round } from '@shared/recurrence'
 import {
+  buildCompletedTodoItems,
   buildTodoItem,
   buildTodoItems,
   canChangeStatus,
@@ -30,6 +31,7 @@ import type {
 } from '@shared/tasks'
 import { appendEvents } from '../events/append.js'
 import {
+  TIMER_CONFIGURED_TYPE,
   taskDeletedDefinition,
   taskOccurrenceCompletedDefinition,
   taskOccurrenceUncompletedDefinition,
@@ -43,6 +45,7 @@ import {
   taskStepsReorderedDefinition,
   taskUpdatedDefinition,
 } from '../events/index.js'
+import { isActiveTimerOccurrence, stopDraftForTask } from '../timer/service.js'
 import { loadAccountSettings, timeContextOf } from '../events/settings.js'
 import { assertInTransaction } from '../events/transaction.js'
 import {
@@ -99,9 +102,10 @@ import {
  * 不会出现「读的是一个时刻、写的是另一个」。
  */
 
-/** 列表的查询形态（ADR-017 §1.1 的五个 `scope`；`week` 由服务端折算成区间） */
+/** 列表的查询形态：既有五种 scope 加历史完成实例；`week` 由服务端折算成区间。 */
 export type TaskListQuery =
   | { scope: 'today' }
+  | { scope: 'completed' }
   | { scope: 'week' }
   | { scope: 'range'; from: DayKey; to: DayKey }
   | { scope: 'project'; projectId: string }
@@ -150,6 +154,7 @@ export interface CreateTaskInput {
   projectId: string | null
   recurrence: RecurrenceSpec | null
   steps: Step[]
+  pomodoroEnabled?: boolean
 }
 
 /** `PATCH /api/tasks/:id` 的差量：**只有这六个字段可改**（其余各有专属路由，ADR-017 §4） */
@@ -208,7 +213,7 @@ export interface TaskDetail {
 /**
  * `GET /api/tasks?scope=…`（ADR-017 §1.1）。
  *
- * 五个 scope 的判据**全部取自 `shared/tasks`**，本模块只负责拼装：
+ * 六个 scope 的判据**全部取自 `shared/tasks`**，本模块只负责拼装：
  *
  * | scope | 判据 |
  * |---|---|
@@ -217,8 +222,10 @@ export interface TaskDetail {
  * | `range` | §5 的区间 `[from, to]`（闭区间，两端都含） |
  * | `project` | §5 的**归属**判据 `item.projectId === projectId`（**不是区间**） |
  * | `all` | 不做范围判定 |
+ * | `completed` | 所有未删除任务的有效完成实例，每个实例一行；包括后来放弃的历史 |
  *
- * 排序一律是 `sortItems` 的默认 `smart` 模式（ADR-015 §4）。**排序模式与筛选不做成
+ * 既有五种 scope 用 `sortItems` 的默认 `smart` 模式（ADR-015 §4）；
+ * `completed` 按完成时刻倒序。**排序模式与筛选不做成
  * 服务端参数**（ADR-017 §1.1：它们是交互式的，走一次网络往返会让每次点排序都卡一下，
  * 而判据只有一份、不存在漂移风险）——故 `?sort=due` 这类参数会被 `.strict()` 拒成 400，
  * 而不是被静默忽略。
@@ -252,6 +259,8 @@ export function listTasks(db: Db, accountId: string, now: Date, query: TaskListQ
       // ⚠️ 不得改用 `inScope(item, {kind:'range', from: today, to: today})`——
       // 那会让所有逾期项从今日视图消失（ADR-015 §5 的警告，有专门的回归测试）。
       return { today, items: sortItems(todayItems(input), today) }
+    case 'completed':
+      return { today, items: sortCompletedItems(buildCompletedTodoItems(input)) }
     case 'week':
       return {
         today,
@@ -298,6 +307,16 @@ export function listTasks(db: Db, accountId: string, now: Date, query: TaskListQ
         items: sortItems(queryItems(buildItems(input), { scope: { kind: 'all' }, status: 'all' }), today),
       }
   }
+}
+
+/** 完成时间按绝对时刻倒序；同一时刻用实例键定序，使分页前的结果稳定。 */
+function sortCompletedItems(items: TodoItem[]): TodoItem[] {
+  return items.sort((a, b) => {
+    const elapsed = Date.parse(b.completedAt!) - Date.parse(a.completedAt!)
+    if (elapsed !== 0) return elapsed
+    if (a.taskId !== b.taskId) return a.taskId < b.taskId ? -1 : 1
+    return a.occurrenceKey < b.occurrenceKey ? -1 : a.occurrenceKey > b.occurrenceKey ? 1 : 0
+  })
 }
 
 /**
@@ -385,6 +404,13 @@ export function createTask(
       dayKey: write.dayKey,
       dayStartHour: write.dayStartHour,
     },
+    ...(input.pomodoroEnabled === undefined ? [] : [{
+      type: TIMER_CONFIGURED_TYPE,
+      occurredAt: write.occurredAt,
+      payload: { taskId: input.taskId, enabled: input.pomodoroEnabled },
+      dayKey: write.dayKey,
+      dayStartHour: write.dayStartHour,
+    }]),
   ])
 
   const written = findTask(loadTaskSources(db, accountId).projection, input.taskId)
@@ -496,6 +522,7 @@ export function changeTaskStatus(
 
   assertAllowed(canChangeStatus({ from: task.status, to, recurring: task.recurrence !== null }))
 
+  const stop = to === 'abandoned' ? stopDraftForTask(db, accountId, now, taskId) : null
   appendEvents(db, accountId, [
     {
       type: taskStatusChangedDefinition.type,
@@ -505,6 +532,8 @@ export function changeTaskStatus(
       dayStartHour: write.dayStartHour,
     },
   ])
+  // 停表与状态变更同事务，但用独立批次：撤销放弃不应把空档算作实际计时。
+  if (stop !== null) appendEvents(db, accountId, [stop])
 
   return { task: viewOf(reloadTask(db, accountId, taskId)) }
 }
@@ -653,6 +682,7 @@ export function deleteTask(
   const sources = loadTaskSources(db, accountId)
   requireLiveTask(sources, taskId)
 
+  const stop = stopDraftForTask(db, accountId, now, taskId)
   const appended = appendEvents(db, accountId, [
     {
       type: taskDeletedDefinition.type,
@@ -662,6 +692,7 @@ export function deleteTask(
       dayStartHour: write.dayStartHour,
     },
   ])
+  if (stop !== null) appendEvents(db, accountId, [stop])
   const batchId = appended[0]?.batchId
   if (batchId === undefined) {
     throw new Error('删除事件没有写进流水：这是事件层的不变式被破坏（ADR-010 §3）。')
@@ -703,12 +734,18 @@ export function completeOccurrence(
   const sources = loadTaskSources(db, accountId)
   const task = requireTaskIn(sources, taskId)
   const events = occurrenceEventsOf(sources.events)
-  requireRound(task, events, write.today, key)
+  // 跨日运行的重复任务：昨天启动时轮次已通过 startTimer 校验；今天的
+  // deriveRounds 只留下最新 pending，旧键可能不再出现。仅当前 active 精确
+  // 匹配的键可沿用启动时的验证，不开放任意历史轮次补完成。
+  if (task.recurrence === null || !isActiveTimerOccurrence(db, accountId, taskId, key)) {
+    requireRound(task, events, write.today, key)
+  }
 
   assertAllowed(
     canCompleteOccurrence({ task, instanceCompleted: isCompleted(task, events, key) }),
   )
 
+  const stop = stopDraftForTask(db, accountId, now, taskId, key)
   appendEvents(db, accountId, [
     {
       type: taskOccurrenceCompletedDefinition.type,
@@ -724,6 +761,7 @@ export function completeOccurrence(
       dayStartHour: write.dayStartHour,
     },
   ])
+  if (stop !== null) appendEvents(db, accountId, [stop])
 
   return { item: rebuildItemAfterWrite(db, accountId, taskId, write.today) }
 }
@@ -750,7 +788,9 @@ export function uncompleteOccurrence(
   const sources = loadTaskSources(db, accountId)
   const task = requireTaskIn(sources, taskId)
   const events = occurrenceEventsOf(sources.events)
-  requireRound(task, events, write.today, key)
+  // 已完成事件本身是可更正的历史事实；改动或移除重复规则之后，它的键
+  // 可能不再出现在当前 roundsOf 中。首次完成仍必须走真实轮次校验。
+  if (!isCompleted(task, events, key)) requireRound(task, events, write.today, key)
 
   assertAllowed(canUncompleteOccurrence({ instanceCompleted: isCompleted(task, events, key) }))
 

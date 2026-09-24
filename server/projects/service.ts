@@ -7,9 +7,13 @@ import type { EventDraft } from '../events/types.js'
 import { appendEvents } from '../events/append.js'
 import {
   projectCreatedDefinition,
+  projectArchiveChangedDefinition,
   projectCurrentChangedDefinition,
   projectDeletedDefinition,
+  projectOrderDefinition,
   projectUpdatedDefinition,
+  type ProjectOrderPayload,
+  type ProjectArchiveChangedPayload,
 } from '../events/index.js'
 import { loadAccountSettings } from '../events/settings.js'
 import { assertInTransaction } from '../events/transaction.js'
@@ -57,6 +61,8 @@ export interface ProjectView {
   startsOn: DayKey
   endsOn: DayKey
   isCurrent: boolean
+  /** 归档只影响导航与活跃排序，不删除项目或其下任务。 */
+  archived: boolean
   /** 派生状态（ADR-016 §4：不落库） */
   state: 'upcoming' | 'active' | 'ended'
   createdAt: string
@@ -95,25 +101,150 @@ export interface ProjectPatch {
  * `GET /api/projects`（ADR-017 §1.3）。
  *
  * **只返回未删除的项目**（ADR-016 §6：软删除的项目不该出现在任何清单里），
- * 按 `(startsOn, id)` 稳定升序——与 `shared/plan/project.ts` 的 `projectsOfDay`
- * 同一把排序键（「同一份数据在任何路径下顺序一致」是 ADR-010 §5 那条逐字段断言的底座）。
+ * 未保存手动顺序前按 `(startsOn, id)` 稳定升序；保存后按最新有效
+ * `project/order` 排序。后来新建的项目按创建事件顺序接在末尾。
  */
 export function listProjects(db: Db, accountId: string, now: Date): ProjectListResult {
   const sources = loadTaskSources(db, accountId)
   const today = todayOf(db, accountId, now)
-  const rows = sources.projection.projects
-    .filter((project) => project.deletedAt === null)
+  const savedOrder = latestProjectOrder(sources.events)
+  const archive = archiveStateOf(sources.events)
+  const rank = new Map(savedOrder?.projectIds.map((id, index) => [id, index] as const) ?? [])
+  const createdRank = new Map<string, number>()
+  for (const [index, event] of sources.events.entries()) {
+    if (event.type !== projectCreatedDefinition.type) continue
+    const id = (event.payload as { projectId: string }).projectId
+    createdRank.set(id, index)
+  }
+  const compareActive = (a: ProjectedProject, b: ProjectedProject): number => {
+    if (savedOrder !== null) {
+      const aRank = rank.get(a.id)
+      const bRank = rank.get(b.id)
+      if (aRank !== undefined && bRank !== undefined) return aRank - bRank
+      if (aRank !== undefined) return -1
+      if (bRank !== undefined) return 1
+      const aCreated = archive.get(a.id)?.index ?? createdRank.get(a.id)
+      const bCreated = archive.get(b.id)?.index ?? createdRank.get(b.id)
+      if (aCreated !== undefined && bCreated !== undefined && aCreated !== bCreated) {
+        return aCreated - bCreated
+      }
+    }
+    if (a.startsOn !== b.startsOn) return a.startsOn < b.startsOn ? -1 : 1
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+  }
+  const live = sources.projection.projects.filter((project) => project.deletedAt === null)
+  const active = live.filter((project) => archive.get(project.id)?.archived !== true).sort(compareActive)
+  const archived = live.filter((project) => archive.get(project.id)?.archived === true)
     .sort((a, b) => {
-      if (a.startsOn !== b.startsOn) return a.startsOn < b.startsOn ? -1 : 1
-      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+      const aIndex = archive.get(a.id)?.index ?? -1
+      const bIndex = archive.get(b.id)?.index ?? -1
+      return bIndex - aIndex || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
     })
+  const rows = [...active, ...archived]
 
-  const current = rows.find((project) => project.isCurrent)
+  const current = active.find((project) => project.isCurrent)
   return {
-    projects: rows.map((row) => viewOf(row, today)),
+    projects: rows.map((row) => viewOf(row, today, archive.get(row.id)?.archived ?? false)),
     currentProjectId: current?.id ?? null,
     today,
   }
+}
+
+interface ArchiveState {
+  archived: boolean
+  /** 该归档/恢复事件在有效事件序列中的位置，用于稳定排列。 */
+  index: number
+}
+
+function archiveStateOf(events: readonly { type: string; payload: unknown }[]): Map<string, ArchiveState> {
+  const state = new Map<string, ArchiveState>()
+  for (const [index, event] of events.entries()) {
+    if (event.type !== projectArchiveChangedDefinition.type) continue
+    const payload = event.payload as ProjectArchiveChangedPayload
+    state.set(payload.projectId, { archived: payload.archived, index })
+  }
+  return state
+}
+
+function latestProjectOrder(events: readonly { type: string; payload: unknown }[]): ProjectOrderPayload | null {
+  let latest: ProjectOrderPayload | null = null
+  for (const event of events) {
+    if (event.type === projectOrderDefinition.type) latest = event.payload as ProjectOrderPayload
+  }
+  return latest
+}
+
+/** 提交完整当前集合，拒绝缺项、重复项和他账号项目；不改当前项目或任务归属。 */
+export function reorderProjects(
+  db: Db,
+  accountId: string,
+  now: Date,
+  projectIds: readonly string[],
+): ProjectListResult {
+  assertInTransaction(db, '调整项目顺序')
+  const sources = loadTaskSources(db, accountId)
+  const archive = archiveStateOf(sources.events)
+  const liveIds = sources.projection.projects
+    .filter((project) => project.deletedAt === null
+      && archive.get(project.id)?.archived !== true)
+    .map((project) => project.id)
+  const expected = new Set(liveIds)
+  if (projectIds.length !== liveIds.length
+    || new Set(projectIds).size !== projectIds.length
+    || projectIds.some((id) => !expected.has(id))) {
+    throw invalidInput('projectIds 必须完整列出当前账号所有未归档、未删除项目，且不能重复')
+  }
+
+  const saved = latestProjectOrder(sources.events)
+  if (saved !== null && saved.projectIds.length === projectIds.length
+    && saved.projectIds.every((id, index) => id === projectIds[index])) {
+    return listProjects(db, accountId, now)
+  }
+  const write = writeContextOf(db, accountId, now)
+  appendEvents(db, accountId, [{
+    type: projectOrderDefinition.type,
+    occurredAt: write.occurredAt,
+    payload: { projectIds: [...projectIds] },
+    dayKey: write.dayKey,
+    dayStartHour: write.dayStartHour,
+  }])
+  return listProjects(db, accountId, now)
+}
+
+/** 归档独立于删除：任务归属、项目日期和历史都保持；归档当前项目时清空当前选择。 */
+export function setProjectArchived(
+  db: Db,
+  accountId: string,
+  now: Date,
+  projectId: string,
+  archived: boolean,
+): { project: ProjectView } {
+  assertInTransaction(db, '归档或恢复项目')
+  const sources = loadTaskSources(db, accountId)
+  const project = requireLiveProject(sources, projectId)
+  const current = archiveStateOf(sources.events).get(projectId)?.archived ?? false
+  const write = writeContextOf(db, accountId, now)
+  if (current === archived) return { project: viewOf(project, write.today, current) }
+
+  const drafts: EventDraft[] = [{
+    type: projectArchiveChangedDefinition.type,
+    occurredAt: write.occurredAt,
+    payload: { projectId, archived },
+    dayKey: write.dayKey,
+    dayStartHour: write.dayStartHour,
+  }]
+  if (archived && project.isCurrent) {
+    drafts.push({
+      type: projectCurrentChangedDefinition.type,
+      occurredAt: write.occurredAt,
+      payload: { projectId: null },
+      dayKey: write.dayKey,
+      dayStartHour: write.dayStartHour,
+    })
+  }
+  appendEvents(db, accountId, drafts)
+  const after = loadTaskSources(db, accountId)
+  return { project: viewOf(requireProjectIn(after, projectId), write.today, archived) }
 }
 
 /**
@@ -138,7 +269,11 @@ export function createProject(
 
   const existing = sources.projection.projects.find((project) => project.id === input.projectId)
   if (existing !== undefined) {
-    return { project: viewOf(existing, write.today), created: false }
+    return {
+      project: viewOf(existing, write.today,
+        archiveStateOf(sources.events).get(existing.id)?.archived ?? false),
+      created: false,
+    }
   }
   assertRange(input.startsOn, input.endsOn)
 
@@ -171,7 +306,7 @@ export function createProject(
   appendEvents(db, accountId, drafts)
 
   const written = requireProjectIn(loadTaskSources(db, accountId), input.projectId)
-  return { project: viewOf(written, write.today), created: true }
+  return { project: viewOf(written, write.today, false), created: true }
 }
 
 /**
@@ -215,7 +350,11 @@ export function updateProject(
     },
   ])
 
-  return { project: viewOf(requireProjectIn(loadTaskSources(db, accountId), projectId), write.today) }
+  const after = loadTaskSources(db, accountId)
+  return {
+    project: viewOf(requireProjectIn(after, projectId), write.today,
+      archiveStateOf(after.events).get(projectId)?.archived ?? false),
+  }
 }
 
 /**
@@ -277,6 +416,9 @@ export function activateProject(
   const write = writeContextOf(db, accountId, now)
   const sources = loadTaskSources(db, accountId)
   requireLiveProjectAsInput(sources, projectId)
+  if (archiveStateOf(sources.events).get(projectId)?.archived === true) {
+    throw invalidInput('已归档项目不能设为当前项目')
+  }
 
   appendEvents(db, accountId, [
     {
@@ -396,13 +538,14 @@ function assertRange(startsOn: DayKey, endsOn: DayKey): void {
   }
 }
 
-function viewOf(project: ProjectedProject, today: DayKey): ProjectView {
+function viewOf(project: ProjectedProject, today: DayKey, archived: boolean): ProjectView {
   return {
     projectId: project.id,
     name: project.name,
     startsOn: project.startsOn,
     endsOn: project.endsOn,
-    isCurrent: project.isCurrent,
+    isCurrent: project.isCurrent && !archived,
+    archived,
     // 状态是**派生**的，不落库（ADR-016 §4）：`ended ⇔ today > endsOn`。
     // 判据取自 `shared/plan` 的 `projectState`——本模块不自己写那三个分支。
     state: projectState({ startsOn: project.startsOn, endsOn: project.endsOn }, today),

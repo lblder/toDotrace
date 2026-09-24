@@ -16,6 +16,8 @@ import { useTaskDetail } from '../../hooks/use-tasks'
 import { IconAlert } from '../common/Icons'
 import { describePlannedWeek } from './day-text'
 import { describeRule, FREQ_OPTIONS, WEEKDAY_OPTIONS } from './rule-text'
+import { TimerTaskSettings } from '../timer/TimerControls'
+import { isUpcomingPreview } from '@shared/tasks/views'
 
 type PlanLevel = 'none' | 'day' | 'week'
 
@@ -40,8 +42,6 @@ export interface TaskDetailFormProps {
   readonly today: DayKey
   readonly projects: readonly ProjectRow[]
   readonly actions: TaskActions
-  /** 入选理由（「它为什么在这个视图里」），**与排序理由是两类**（ADR-015 §1） */
-  readonly selectionReasons: readonly string[]
   /**
    * **写成功之后的页面级反馈**。
    *
@@ -83,7 +83,7 @@ export function TaskDetailForm(props: TaskDetailFormProps) {
   if (detail.detail === null) {
     return (
       <div className="ta-tasks__detail">
-        <p className="ta-tasks__hint">正在读取这条任务的定义…</p>
+        <p className="ta-tasks__hint">正在读取任务…</p>
       </div>
     )
   }
@@ -97,13 +97,13 @@ function TaskDetailEditor({
   today,
   projects,
   actions,
-  selectionReasons,
   onNotice,
 }: TaskDetailFormProps & { readonly detail: TaskDetailPayload }) {
   const task: TaskView = detail.task
   const [title, setTitle] = useState(task.title)
   const [notes, setNotes] = useState(task.notes)
-  const [importance, setImportance] = useState(task.importance)
+  const [importanceOverride, setImportance] = useState<typeof task.importance | null>(null)
+  const importance = importanceOverride ?? task.importance
   const [tagsText, setTagsText] = useState(task.tags.join(' '))
   const [projectId, setProjectId] = useState(task.projectId ?? '')
   const [recurrence, setRecurrence] = useState<RecurrenceSpec | null>(task.recurrence)
@@ -150,14 +150,15 @@ function TaskDetailEditor({
         input: {
           title,
           notes,
-          importance,
+          ...(importanceOverride === null ? {} : { importance: importanceOverride }),
           tags: parseTags(tagsText),
           projectId: projectId === '' ? null : projectId,
           recurrence,
         },
       })
+      setImportance(null)
       setFeedback({ tone: 'info', text: '已保存。' })
-      onNotice({ text: `已保存《${title}》的定义。` })
+      onNotice({ text: `已保存《${title}》。` })
     } catch (cause) {
       setFeedback({ tone: 'error', text: errorMessage(cause) })
     } finally {
@@ -219,9 +220,22 @@ function TaskDetailEditor({
 
   return (
     <div className="ta-tasks__detail">
+      <TimerTaskSettings taskId={item.taskId} occurrenceKey={item.occurrenceKey} canStart={item.status !== 'abandoned' && (!item.recurring || item.pending)} completed={item.completedAt !== null}/>
+      {item.steps.length > 0 ? <section className="ta-tasks__detailSteps" aria-label="任务步骤">
+        <h3 className="ta-tasks__fieldsetTitle">步骤 {item.steps.filter((step) => step.checkedAt !== null).length}/{item.steps.length}</h3>
+        <ul className="ta-tasks__stepList">{item.steps.map((step) => <li className="ta-tasks__step" key={step.id}>
+          <input type="checkbox" checked={step.checkedAt !== null}
+            aria-label={`步骤「${step.title}」（${item.title} 的这一轮）`}
+            disabled={isUpcomingPreview(item, today) || item.status === 'abandoned' || actions.toggleStep.isPending}
+            onChange={(event) => actions.toggleStep.mutate({ taskId: item.taskId, stepId: step.id, originalPlannedDate: item.occurrenceKey, checked: event.target.checked }, {
+              onError: (cause) => setFeedback({ tone: 'error', text: errorMessage(cause) }),
+            })}/>
+          <span className={step.checkedAt !== null ? 'ta-tasks__stepText--done' : undefined}>{step.title}</span>
+        </li>)}</ul>
+      </section> : null}
       <dl className="ta-tasks__facts">
         <div>
-          <dt>实例键</dt>
+          <dt>{isUpcomingPreview(item, today) ? '下一轮预计日期' : '本轮日期'}</dt>
           <dd className="ta-mono" data-testid="detail-occurrence">
             {item.occurrenceKey}
           </dd>
@@ -231,8 +245,8 @@ function TaskDetailEditor({
           <dd className="ta-mono">{item.createdAt}</dd>
         </div>
         <div>
-          <dt>本实例完成</dt>
-          <dd className="ta-mono">{item.completedDayKey ?? '未完成'}</dd>
+          <dt>完成情况</dt>
+          <dd className="ta-mono">{isUpcomingPreview(item, today) ? '尚未开始此轮' : item.completedDayKey ?? '未完成'}</dd>
         </div>
       </dl>
 
@@ -254,31 +268,13 @@ function TaskDetailEditor({
               </li>
             ))}
           </ul>
-          <p className="ta-field__hint">
-            轮次<strong>不落库</strong>，是读取时从重复规则推导出来的（ADR-011 §4）；
-            已固化的轮次日期不会因规则变更而重算。
-          </p>
         </div>
       )}
 
-      <p className="ta-tasks__previewNote">
-        {item.recurring
-          ? '它为什么在今日视图里：重复任务看的是它显示的那一轮（ADR-015 §3 的 A–F）。'
-          : '它为什么在这个视图里：'}
-        {selectionReasons.length === 0 ? '（当前没有任何一条入选理由）' : null}
-        {selectionReasons.map((text) => (
-          <code className="ta-mono ta-tasks__released" key={text}>
-            {text}
-          </code>
-        ))}
-        {item.overdue ? (
-          <code className="ta-mono ta-tasks__released">逾期（判据由服务端给出，界面不自己算）</code>
-        ) : null}
-      </p>
 
       {/* --- 定义：PATCH 整行快照（ADR-017 §4） --- */}
       <div className="ta-tasks__fieldset">
-        <h4 className="ta-tasks__fieldsetTitle">定义</h4>
+        <h4 className="ta-tasks__fieldsetTitle">任务信息</h4>
 
         <label className="ta-field">
           <span className="ta-field__label">标题</span>
@@ -314,7 +310,7 @@ function TaskDetailEditor({
             >
               <option value="low">低</option>
               <option value="normal">普通</option>
-              <option value="high">高</option>
+              <option value="high">重要</option>
             </select>
           </label>
 
@@ -328,7 +324,7 @@ function TaskDetailEditor({
             >
               <option value="">（不归属任何项目）</option>
               {/* 服务端只返回未删除的项目，故这里不再滤一遍（那会滤成空列表） */}
-              {projects.map((project) => (
+              {projects.filter((project) => !project.archived || project.projectId === projectId).map((project) => (
                 <option value={project.projectId} key={project.projectId}>
                   {project.name}
                 </option>
@@ -357,7 +353,7 @@ function TaskDetailEditor({
             onClick={() => void saveDefinition()}
             disabled={busy || title.trim().length === 0}
           >
-            保存定义
+            保存任务
           </button>
           {title.trim().length === 0 ? (
             <span className="ta-field__hint">标题不能为空（服务端会以 400 拒绝空标题）</span>
@@ -371,8 +367,7 @@ function TaskDetailEditor({
 
         {rescheduleVerdict.allowed ? null : (
           <p className="ta-field__hint" data-testid="reschedule-blocked">
-            日期由重复规则决定，不可直接顺延（服务端会以 409 `conflict/date-driven-by-rule` 拒绝）。
-            要改「从哪天开始」，改上面的「首轮起点」；要整体平移，改规则。
+            重复任务的日期由规则决定。要更改起点，请调整重复设置。
           </p>
         )}
 
@@ -410,8 +405,7 @@ function TaskDetailEditor({
             某一周
           </label>
           <p className="ta-field__hint">
-            层级不是存储字段，而是「哪个锚点非空」的函数（ADR-016 §1）；
-            日与周<strong>互斥</strong>——一次只排一层，故这里是一组单选。
+            选择某一天或某一周，只能选一种计划方式。
           </p>
         </fieldset>
 
@@ -439,7 +433,7 @@ function TaskDetailEditor({
               aria-label="计划周"
             />
             <span className="ta-field__hint" data-testid="week-preview">
-              {planWeek === '' ? '还没选' : `存为该周周一：计划周 ${describePlannedWeek(weekStart(planWeek))}`}
+              {planWeek === '' ? '还没选' : `计划周 ${describePlannedWeek(weekStart(planWeek))}`}
             </span>
           </label>
         ) : null}
@@ -472,7 +466,7 @@ function TaskDetailEditor({
       <div className="ta-tasks__fieldset">
         <h4 className="ta-tasks__fieldsetTitle">状态</h4>
         <p className="ta-field__hint">
-          放弃<strong>不取消任何完成记录</strong>（ADR-013 §2）：历史照常保留，只是它不再被呈现为已完成。
+          放弃后保留历史完成记录。
         </p>
         <div className="ta-tasks__detailActions">
           {item.status === 'abandoned' ? (
@@ -511,10 +505,7 @@ function TaskDetailEditor({
         </p>
       )}
 
-      <p className="ta-field__hint">
-        本轮实例：<span className="ta-mono">{item.occurrenceKey}</span>
-        ——步骤的勾选与完成记录都挂在这一轮上，切到别的日子看到的是另一轮。
-      </p>
+      {isUpcomingPreview(item, today) ? <p className="ta-field__hint">{item.occurrenceKey} 起可完成本轮任务。</p> : null}
     </div>
   )
 }
@@ -687,8 +678,7 @@ function RecurrenceEditor({
               : null}
           </p>
           <p className="ta-field__hint">
-            ⚠️ 开启重复后，<strong>计划日 / 计划周 / 期限三个锚点必须为空</strong>（ADR-013 §3.1）——
-            保存时会先清空它们（那是「排期」那半边的事），再写入规则。
+            保存重复规则后，将清除原计划日期和期限。
           </p>
         </>
       )}

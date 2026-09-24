@@ -238,6 +238,12 @@ export interface TodoItem {
   taskId: string
   /** 实例键的日期分量（§2）：非重复任务恒为 `indexDate`；重复任务为该轮的「原计划日期」 */
   occurrenceKey: DayKey
+  /**
+   * 重复任务的下一次安排日：已有待做轮次时取该轮日期，否则取规则允许的下一次未来命中日。
+   * 普通任务及已终止的重复规则为 null。它只是读时提示，不代表未来实例已经产生。
+   * 尤其不能把 `startsOn` 在未来时的 `occurrenceKey` 回落值 `indexDate` 当成排期。
+   */
+  scheduledOccurrenceDate: DayKey | null
   title: string
   notes: string
   importance: Importance

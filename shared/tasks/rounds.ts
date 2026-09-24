@@ -26,7 +26,7 @@
  */
 import { compareDayKey } from '@shared/time'
 import type { DayKey } from '@shared/time'
-import { deriveRounds } from '@shared/recurrence'
+import { deriveRounds, hitSequence } from '@shared/recurrence'
 import type { NextAnchorMode, RecurrenceTemplate, Round, RoundCompletion } from '@shared/recurrence'
 
 import type { OccurrenceEvent, ProjectedTask } from './types'
@@ -269,4 +269,40 @@ export function resolveInstance(
 
   // 4. 一轮都没有（`startsOn` 在未来）
   return pick(task.indexDate)
+}
+
+/**
+ * 重复任务的下一次安排日。`resolveInstance` 的 `occurrenceKey` 是实例标识，
+ * 在一轮都没有时会回落到 `indexDate`（创建日），不能用它表达未来排期。
+ * 此函数仅返回日期值，不把未来轮次放进 `roundsOf` 或完成态。
+ */
+export function scheduledOccurrenceDateOf(
+  task: ProjectedTask,
+  events: readonly OccurrenceEvent[],
+  today: DayKey,
+  resolved: ResolvedInstance = resolveInstance(task, events, today),
+): DayKey | null {
+  const spec = task.recurrence
+  if (spec === null) return null
+  if (resolved.pending !== null) return resolved.pending
+
+  const completions = effectiveCompletions(task, events)
+  let head: (typeof completions)[number] | null = null
+  let floor: DayKey | null = null
+  for (const completion of completions) {
+    if (head === null || completion.eventId > head.eventId) head = completion
+    const key = completion.payload.originalPlannedDate
+    if (floor === null || compareDayKey(key, floor) > 0) floor = key
+  }
+
+  // `next: null` 是完成时固化的「没有下一轮」；规则后来改变也不凭空复活它。
+  if (head !== null && head.payload.next === null) return null
+  const start = head === null ? spec.startsOn : head.payload.next!.date
+  for (const hit of hitSequence(spec.rule, spec.startsOn)) {
+    if (compareDayKey(hit, start) < 0) continue
+    if (floor !== null && compareDayKey(hit, floor) <= 0) continue
+    if (compareDayKey(hit, today) <= 0) continue
+    return hit
+  }
+  return null
 }

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { DEFAULT_DAY_START_HOUR } from '@shared/time'
 import { useCheckin } from '../../hooks/use-checkin'
 import type { CheckinMutation } from '../../hooks/use-checkin'
 import { errorMessage } from '../../lib/api-client'
@@ -19,7 +18,7 @@ interface Feedback {
  * 今日打卡（01 FR1 / ADR-012）。
  *
  * 三种状态各有各的呈现，**都不是错误态**：
- *   · `day === null` —— 今天还没有到达记录 = 休息日：中性文案「今天偷偷懒」，
+ *   · `day === null` —— 今天还没有到达记录 = 休息日：中性文案「尚未打卡」，
  *     下面就是「到达实验室」按钮（02 §3 的流程图：休息日正是打卡的起点）；
  *   · 有到达、无离开 —— 压在纸上的那枚章 + 可选的离开动作；
  *   · 有到达、有离开 —— 今天的记录已闭合，不再提供任何写入入口。
@@ -85,13 +84,9 @@ export function CheckinPage() {
   return (
     <>
       <section className="ta-card ta-checkin__today" aria-labelledby="checkin-heading">
-        <p className="ta-checkin__eyebrow ta-mono">CHECK-IN</p>
         <h1 className="ta-checkin__heading" id="checkin-heading">
           今日打卡
         </h1>
-        <p className="ta-checkin__subtitle">
-          到达记一次，离开可选。一天至多一条记录，重复打卡不会写第二条。
-        </p>
 
         {isLoading ? (
           <p className="ta-checkin__hint">正在读取今日状态…</p>
@@ -139,17 +134,10 @@ export function CheckinPage() {
             <span className="ta-checkin__streakNumber ta-readout">{streak}</span>
             <span className="ta-checkin__streakUnit">天</span>
           </p>
-          <p className="ta-checkin__streakNote">
-            按有到达记录的日子往回数：今天还没到达就从昨天数起，当天尚未打卡不会立刻清零；
-            中间断了就从断掉的地方重新开始。
-          </p>
+<details className="ta-checkin__streakNote"><summary>计算方式</summary><p>连续有到达记录的天数；今天未打卡时从昨天起算。</p></details>
         </section>
       )}
 
-      <p className="ta-checkin__footnote">
-        一天的边界默认为凌晨 {DEFAULT_DAY_START_HOUR}:00：
-        在这个时刻之前的到达会记入前一天。归属日在写入时确定，此后不再重算。
-      </p>
     </>
   )
 }
@@ -167,10 +155,7 @@ function RestDay({ onArrive, pending }: { onArrive: () => void; pending: boolean
   return (
     <div className="ta-checkin__body">
       <div className="ta-checkin__rest">
-        <p className="ta-checkin__restMain">今天偷偷懒</p>
-        <p className="ta-checkin__restNote">
-          今天还没有到达记录。这一天不计入打卡天数，也不会写进任何统计。
-        </p>
+        <p className="ta-checkin__restMain">尚未打卡</p>
       </div>
 
       <div className="ta-checkin__actions">
@@ -240,11 +225,11 @@ function ArrivedDay({
             </button>
           </div>
           <p className="ta-checkin__hint">
-            离开可以不点：不点的话这一天只记到达时刻，时长按「未知」处理，不自动闭合、不猜。
+            记录离开后可统计停留时长。
           </p>
         </>
       ) : (
-        <p className="ta-checkin__hint">今天的到达与离开都已记录，不会再有新的写入。</p>
+        <p className="ta-checkin__hint">今日打卡已完成。</p>
       )}
     </div>
   )

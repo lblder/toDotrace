@@ -9,6 +9,7 @@
 
 import { request } from './client'
 import type { DayKey } from '@shared/time'
+import type { PauseTimerInput, StartTimerInput, TimerSnapshot } from '@shared/timer'
 import type {
   AuthPayload,
   CheckinResult,
@@ -176,10 +177,10 @@ export const api = {
      --------------------------------------------------------------------- */
 
   /**
-   * GET /api/tasks —— 五个 scope 各是一条判据（ADR-017 §1.1）。
+   * GET /api/tasks —— 既有五种 scope 加逐实例的 `completed` 历史视图。
    *
-   * ⚠️ **排序与筛选不走服务端参数**（ADR-017 §1.1）：服务端按 ADR-015 §4 的
-   * 默认顺序返回，换序与筛选由前端用 `shared/tasks/sort.ts` / `filter.ts` 完成。
+   * ⚠️ **排序与筛选不走服务端参数**（ADR-017 §1.1）：既有五种视图按 ADR-015 §4 的
+   * 默认顺序返回，历史完成视图按 completedAt 倒序；交互式换序与筛选由前端处理。
    * 那两份是同一份纯函数——**组件里不得重写排序**（ADR-015 §7）。
    *
    * `scope=today` 是 ADR-015 §3 的入选规则 A–F；`week` / `range` 是区间判定；
@@ -295,6 +296,33 @@ export const api = {
     })
   },
 
+  /** 任务计时由服务端事件折叠，刷新和跨日都沿用同一运行片段。 */
+  getTimer(signal?: AbortSignal): Promise<TimerSnapshot> {
+    return request<TimerSnapshot>({
+      method: 'GET',
+      path: '/api/timer',
+      auth: true,
+      ...(signal === undefined ? {} : { signal }),
+    })
+  },
+
+  configureTimer(taskId: string, enabled: boolean): Promise<TimerSnapshot> {
+    return request<TimerSnapshot>({
+      method: 'PUT',
+      path: `/api/timer/tasks/${encodeURIComponent(taskId)}`,
+      body: { enabled },
+      auth: true,
+    })
+  },
+
+  startTimer(input: StartTimerInput): Promise<TimerSnapshot> {
+    return request<TimerSnapshot>({ method: 'POST', path: '/api/timer/start', body: input, auth: true })
+  },
+
+  pauseTimer(input: PauseTimerInput): Promise<TimerSnapshot> {
+    return request<TimerSnapshot>({ method: 'POST', path: '/api/timer/pause', body: input, auth: true })
+  },
+
   /* --- 步骤（ADR-017 §1.2） --------------------------------------------- */
 
   addStep(taskId: string, title: string): Promise<TaskPayload> {
@@ -366,6 +394,16 @@ export const api = {
     })
   },
 
+  /** PUT /api/projects/order —— 提交当前账号全部未归档、未删除项目的完整显示顺序。 */
+  reorderProjects(projectIds: readonly string[]): Promise<ProjectListPayload> {
+    return request<ProjectListPayload>({
+      method: 'PUT',
+      path: '/api/projects/order',
+      body: { projectIds },
+      auth: true,
+    })
+  },
+
   createProject(input: CreateProjectInput): Promise<{ project: ProjectRow }> {
     return request<{ project: ProjectRow }>({
       method: 'POST',
@@ -380,6 +418,16 @@ export const api = {
       method: 'PATCH',
       path: `/api/projects/${encodeURIComponent(projectId)}`,
       body: input,
+      auth: true,
+    })
+  },
+
+  /** 归档保留项目和任务历史，恢复后重新进入活跃项目列表。 */
+  setProjectArchived(projectId: string, archived: boolean): Promise<{ project: ProjectRow }> {
+    return request<{ project: ProjectRow }>({
+      method: 'PATCH',
+      path: `/api/projects/${encodeURIComponent(projectId)}/archive`,
+      body: { archived },
       auth: true,
     })
   },
@@ -469,9 +517,9 @@ export const api = {
   },
 } as const
 
-/** `GET /api/tasks` 的查询（ADR-017 §1.1 的五个 scope） */
+/** `GET /api/tasks` 的查询（既有五种 scope + 逐完成实例的 completed） */
 export type TaskListQuery =
-  | { readonly scope: 'today' | 'all' }
+  | { readonly scope: 'today' | 'all' | 'completed' }
   | { readonly scope: 'week' }
   | { readonly scope: 'range'; readonly from: DayKey; readonly to: DayKey }
   | { readonly scope: 'project'; readonly projectId: string }

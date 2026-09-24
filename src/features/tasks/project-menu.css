@@ -1,0 +1,13 @@
+.ta-projectMenu { position: fixed; z-index: 1000; width: 212px; padding: 6px; border: 1px solid var(--c-border); border-radius: var(--radius-md); background: var(--c-panel); box-shadow: 0 8px 28px #0002; }
+.ta-projectMenu button { display: block; width: 100%; padding: 10px 12px; text-align: left; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--c-ink); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.ta-projectMenu button:hover, .ta-projectMenu button:focus-visible { background: var(--c-primary-soft); outline: none; color: var(--c-primary-text); }
+.ta-projectMenu p { padding: 8px; font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.ta-projectRename { width: min(400px, calc(100vw - 32px)); margin: auto; padding: 24px; border: 1px solid var(--c-border); border-radius: var(--radius-md); background: var(--c-panel); color: var(--c-ink); box-shadow: 0 20px 60px #0003; }
+.ta-projectRename::backdrop { background: #0005; }
+.ta-projectRename h2 { margin: 0 0 20px; font-size: var(--fs-lg); }
+.ta-projectRename__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.ta-tasks__projectList .ta-projectMore { margin-left: auto; }
+.ta-projectMore { border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--c-ink-muted); width: 32px; min-height: 32px; cursor: pointer; font-size: 22px; }
+.ta-projectMore:hover { background: var(--c-primary-soft); color: var(--c-primary-text); }
+.ta-tasks__archivedProjects { margin: 16px 0; }
+.ta-tasks__archivedProjects summary { cursor: pointer; color: var(--c-ink-muted); font-size: var(--fs-sm); }

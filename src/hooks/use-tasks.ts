@@ -19,6 +19,7 @@ import type {
 } from '../lib/api-client'
 import type { TaskStatus } from '@shared/tasks'
 import { queryKeys } from './query-keys'
+import { TIMER_QUERY_KEY } from './use-timer'
 
 /**
  * ADR-017 §10 的三次重取时机（**本文件是它们唯一的落点**）。
@@ -57,10 +58,11 @@ export interface TaskListApi {
  * 服务端没回来之前 `today` 是 `null`，界面显示「正在读取」，
  * **不拿客户端的时钟顶上**——那正是这条约束要防的第二个来源。
  */
-export function useTaskList(query: TaskListQuery): TaskListApi {
+export function useTaskList(query: TaskListQuery, options: { enabled?: boolean } = {}): TaskListApi {
   const result = useQuery<TaskListPayload>({
     queryKey: queryKeys.taskList(query),
     queryFn: async ({ signal }) => api.listTasks(query, signal),
+    enabled: options.enabled ?? true,
     retry: false,
     refetchOnWindowFocus: false,
     refetchInterval: REFETCH_INTERVAL_MS,
@@ -73,6 +75,7 @@ export function useTaskList(query: TaskListQuery): TaskListApi {
   refetchRef.current = refetch
 
   useEffect(() => {
+    if (options.enabled === false) return
     function onFocus(): void {
       void refetchRef.current()
     }
@@ -85,17 +88,16 @@ export function useTaskList(query: TaskListQuery): TaskListApi {
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [])
+  }, [options.enabled])
 
+  const refresh = useCallback(() => { void refetch() }, [refetch])
   return {
     today: result.data?.today ?? null,
     items: result.data?.items ?? [],
     isLoading: result.isLoading,
     isError: result.isError,
     error: result.error,
-    refetch: () => {
-      void result.refetch()
-    },
+    refetch: refresh,
   }
 }
 
@@ -153,6 +155,9 @@ export function useTaskActions(): TaskActions {
 
   const done = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.tasks })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.focus })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.trace })
+    void queryClient.invalidateQueries({ queryKey: TIMER_QUERY_KEY })
   }, [queryClient])
 
   const create = useMutation<CreateTaskPayload, Error, CreateTaskInput>({

@@ -89,13 +89,11 @@ export function InvitesPage() {
   return (
     <>
       <section className="ta-card ta-invites__head" aria-labelledby="invites-heading">
-        <p className="ta-invites__eyebrow ta-mono">INVITES</p>
         <h1 className="ta-invites__heading" id="invites-heading">
           邀请码
         </h1>
         <p className="ta-invites__subtitle">
-          签发一枚邀请码，把它交给实验室同伴，对方即可凭码注册一个成员账号。
-          邀请码有有效期，用过一次即失效；签发后不可撤销。
+          每个邀请码可注册一个账号，签发后不可撤销。
         </p>
       </section>
 
@@ -196,9 +194,6 @@ export function InvitesPage() {
           </ul>
         )}
 
-        <p className="ta-invites__footnote">
-          列表只显示元信息。明文邀请码在签发后不再保留——服务端只存它的哈希。
-        </p>
       </section>
     </>
   )

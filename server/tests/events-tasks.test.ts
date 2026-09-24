@@ -155,7 +155,7 @@ function expectProjectionMatchesReplay(accountId: string): void {
 }
 
 describe('登记（ADR-010 §2：未登记即拒写）', () => {
-  const THIRTEEN = [
+  const TASK_EVENT_TYPES = [
     'task/created',
     'task/updated',
     'task/rescheduled',
@@ -169,19 +169,24 @@ describe('登记（ADR-010 §2：未登记即拒写）', () => {
     'task/step-renamed',
     'task/step-toggled',
     'task/steps-reordered',
+    'task/focus-added',
+    'task/focus-removed',
+    'task/timer-configured',
+    'task/timer-started',
+    'task/timer-stopped',
   ]
 
-  it('13 类一个不多、一个不少，全部登记在册', () => {
-    for (const type of THIRTEEN) {
+  it('任务事件类型一个不多、一个不少，全部登记在册', () => {
+    for (const type of TASK_EVENT_TYPES) {
       expect(EVENT_DEFINITIONS.map((definition) => definition.type)).toContain(type)
     }
     const taskTypes = EVENT_DEFINITIONS.map((definition) => definition.type).filter((type) =>
       type.startsWith('task/'),
     )
-    expect(taskTypes.sort()).toEqual([...THIRTEEN].sort())
+    expect(taskTypes.sort()).toEqual([...TASK_EVENT_TYPES].sort())
   })
 
-  it('13 类的落点一律是 task（kind 常量 + 从载荷取 taskId）', () => {
+  it('任务事件的落点一律是 task（kind 常量 + 从载荷取 taskId）', () => {
     for (const definition of EVENT_DEFINITIONS) {
       if (!definition.type.startsWith('task/')) continue
       expect(definition.target?.kind, definition.type).toBe('task')

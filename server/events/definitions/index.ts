@@ -1,10 +1,12 @@
 import type { RegisteredDefinition } from '../types.js'
 import { checkinEventDefinitions } from './checkin.js'
+import { focusEventDefinitions } from './focus.js'
 import { noteEventDefinitions } from './notes.js'
 import { projectEventDefinitions } from './projects.js'
 import { settingsEventDefinitions } from './settings.js'
 import { systemEventDefinitions } from './system.js'
 import { taskEventDefinitions } from './tasks.js'
+import { timerEventDefinitions } from './timer.js'
 
 /**
  * 阶段 2/3/4 登记的全部事件类型（ADR-010 §2 / §6 / §7、ADR-012 §1、
@@ -25,5 +27,7 @@ export const EVENT_DEFINITIONS: readonly RegisteredDefinition[] = Object.freeze(
   ...checkinEventDefinitions,
   ...noteEventDefinitions,
   ...taskEventDefinitions,
+  ...timerEventDefinitions,
+  ...focusEventDefinitions,
   ...projectEventDefinitions,
 ])

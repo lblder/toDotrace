@@ -8,6 +8,8 @@ import { BrandMark } from '../common/BrandMark'
 import { IconLogout } from '../common/Icons'
 import { BootScreen } from '../common/StatusScreen'
 import { ThemeToggle } from '../common/ThemeToggle'
+import { TimerProvider } from '../../hooks/use-timer'
+import { TimerDock } from '../timer/TimerDock'
 import './shell.css'
 
 interface NavItem {
@@ -20,7 +22,8 @@ interface NavItem {
 const NAV: readonly NavItem[] = [
   // 打卡排在最前：它是每天的例行动作，也是全应用的签名交互（03 §7）
   { route: 'checkin', label: '打卡', ownerOnly: false },
-  { route: 'tasks', label: '任务', ownerOnly: false },
+  { route: 'tasks', label: '待办', ownerOnly: false },
+  { route: 'trace', label: '学习轨迹', ownerOnly: false },
   { route: 'home', label: '工作台', ownerOnly: false },
   { route: 'invites', label: '邀请码', ownerOnly: true },
 ]
@@ -44,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const items = NAV.filter((item) => !item.ownerOnly || user.role === 'owner')
 
   return (
-    <div className="ta-shell">
+    <TimerProvider><div className="ta-shell">
       {/* 跳转链接用按钮实现：hash 路由下 href="#main" 会污染地址栏并触发路由回调 */}
       <button
         type="button"
@@ -106,6 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="ta-shell__main" ref={mainRef} id="main" tabIndex={-1}>
         {children}
       </main>
-    </div>
+      <TimerDock tasksRoute={route === 'tasks'}/>
+    </div></TimerProvider>
   )
 }

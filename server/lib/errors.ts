@@ -33,6 +33,8 @@ export type ErrorCode =
   | 'conflict/occurrence-already-completed'
   /** 取消一个**本就未完成**的实例（ADR-013 §4.7） */
   | 'conflict/occurrence-not-completed'
+  | 'conflict/timer-running'
+  | 'conflict/timer-disabled'
   /** 对**重复任务**调 `/reschedule`（ADR-013 §3.2） */
   | 'conflict/date-driven-by-rule'
   /** 非法状态迁移（如重复任务转「进行中」，ADR-013 §2） */

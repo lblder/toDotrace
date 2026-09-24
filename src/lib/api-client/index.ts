@@ -9,6 +9,14 @@ export type { ApiErrorKind } from './client'
 export { api } from './endpoints'
 export type { Api, TaskListQuery } from './endpoints'
 export type {
+  PauseTimerInput,
+  StartTimerInput,
+  TimerActive,
+  TimerSession,
+  TimerSnapshot,
+  TimerTaskConfig,
+} from '@shared/timer'
+export type {
   AuthPayload,
   CheckinResult,
   CreateInvitePayload,

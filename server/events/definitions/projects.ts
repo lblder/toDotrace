@@ -128,10 +128,26 @@ export const projectCurrentChangedPayloadSchema = z
   .object({ projectId: z.string().min(1).nullable() })
   .strict()
 
+/** 完整可见项目顺序；多项目事件没有单个 target，排序在读模型中折叠。 */
+export const projectOrderPayloadSchema = z.object({
+  projectIds: z.array(z.string().min(1)).refine(
+    (ids) => new Set(ids).size === ids.length,
+    'projectIds 不能重复',
+  ),
+}).strict()
+
+/** 归档是独立于软删除的显示状态，不改变项目、任务与时间区间投影。 */
+export const projectArchiveChangedPayloadSchema = z.object({
+  projectId: z.string().min(1),
+  archived: z.boolean(),
+}).strict()
+
 export type ProjectCreatedPayload = z.infer<typeof projectCreatedPayloadSchema>
 export type ProjectUpdatedPayload = z.infer<typeof projectUpdatedPayloadSchema>
 export type ProjectDeletedPayload = z.infer<typeof projectDeletedPayloadSchema>
 export type ProjectCurrentChangedPayload = z.infer<typeof projectCurrentChangedPayloadSchema>
+export type ProjectOrderPayload = z.infer<typeof projectOrderPayloadSchema>
+export type ProjectArchiveChangedPayload = z.infer<typeof projectArchiveChangedPayloadSchema>
 
 /** 定位项目行。**纯函数**（ADR-010 §4：折叠只吃 (projection, event)）。 */
 function findProject(projection: Projection, projectId: string): ProjectedProject | undefined {
@@ -216,10 +232,26 @@ export const projectCurrentChangedDefinition: EventDefinition<ProjectCurrentChan
     },
   })
 
+export const projectOrderDefinition: EventDefinition<ProjectOrderPayload> = defineEvent({
+  type: 'project/order',
+  schema: projectOrderPayloadSchema,
+  // 一次排序涉及多个项目，故不声明单项目 target；事件按账号读取并参与统一撤销/重放。
+  apply() {},
+})
+
+export const projectArchiveChangedDefinition: EventDefinition<ProjectArchiveChangedPayload> = defineEvent({
+  type: 'project/archive-changed',
+  schema: projectArchiveChangedPayloadSchema,
+  target: projectTarget,
+  apply() {},
+})
+
 /** 阶段 4 登记的全部项目事件定义 */
 export const projectEventDefinitions: readonly RegisteredDefinition[] = [
   projectCreatedDefinition,
   projectUpdatedDefinition,
   projectDeletedDefinition,
   projectCurrentChangedDefinition,
+  projectOrderDefinition,
+  projectArchiveChangedDefinition,
 ]

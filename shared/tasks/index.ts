@@ -51,6 +51,7 @@ export {
   lastEventPerOccurrence,
   resolveInstance,
   roundsOf,
+  scheduledOccurrenceDateOf,
   toRecurrenceTemplate,
 } from './rounds'
 export type { ResolvedInstance } from './rounds'
@@ -59,6 +60,7 @@ export type { ResolvedInstance } from './rounds'
 export {
   BUCKET_REASON,
   bucketReasonOf,
+  buildCompletedTodoItems,
   buildTodoItem,
   buildTodoItems,
   inScope,

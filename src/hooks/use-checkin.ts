@@ -56,6 +56,7 @@ export function useCheckin(): CheckinApi {
       })
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.checkinToday })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.trace })
   }
 
   const arrive = useMutation<CheckinResult, Error, void>({

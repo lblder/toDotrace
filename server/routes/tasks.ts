@@ -33,7 +33,7 @@ import {
  *
  * | 方法 | 路径 |
  * |---|---|
- * | GET | `/api/tasks?scope=today\|week\|range\|project\|all` |
+ * | GET | `/api/tasks?scope=today\|week\|range\|project\|all\|completed` |
  * | GET | `/api/tasks/:id` |
  * | POST | `/api/tasks` |
  * | PATCH | `/api/tasks/:id` |
@@ -144,6 +144,7 @@ const createTaskSchema = z
       .array(stepInputSchema)
       .max(STEP_LIMIT, `步骤最多 ${STEP_LIMIT} 条：单层步骤超过 100 条已不是清单（ADR-017 §3）`)
       .optional(),
+    pomodoroEnabled: z.boolean().optional(),
   })
   .strict()
 
@@ -225,7 +226,7 @@ const stepsOrderSchema = z.object({ order: z.array(z.string().min(1)) }).strict(
  */
 const listQuerySchema = z
   .object({
-    scope: z.enum(['today', 'week', 'range', 'project', 'all']),
+    scope: z.enum(['today', 'week', 'range', 'project', 'all', 'completed']),
     from: dayKeySchema.optional(),
     to: dayKeySchema.optional(),
     projectId: z.string().min(1).optional(),
@@ -465,5 +466,6 @@ function toCreateInput(input: z.infer<typeof createTaskSchema>): CreateTaskInput
     projectId: input.projectId ?? null,
     recurrence: input.recurrence ?? null,
     steps: input.steps ?? [],
+    pomodoroEnabled: input.pomodoroEnabled,
   }
 }

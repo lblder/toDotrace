@@ -262,6 +262,7 @@ export interface CreateTaskInput {
   readonly projectId?: string | null
   readonly recurrence?: RecurrenceSpec | null
   readonly steps?: readonly { readonly id: string; readonly title: string }[]
+  readonly pomodoroEnabled?: boolean
 }
 
 /** `POST /api/tasks` 的响应。`created: false` = 该 `taskId` 已存在，返回既有任务（幂等） */
@@ -270,17 +271,11 @@ export interface CreateTaskPayload {
   readonly created: boolean
 }
 
-/**
- * `PATCH /api/tasks/:id` 的请求体 —— **整行快照，不是差量**（ADR-017 §4）。
- *
- * 给了的字段必须给全；`status` / `steps` / 三个日期锚点 / `manualOrder` / 删除
- * **各有专属路由**，出现在这里即 `400`（ADR-017 §4 的排除清单）。
- * 因此本类型**故意不包含它们**——类型上就写不出来。
- */
-export type UpdateTaskInput = Omit<
+/** PATCH 只发送需要修改的定义字段；其余字段由服务端保留。 */
+export type UpdateTaskInput = Partial<Omit<
   CreateTaskInput,
-  'taskId' | 'steps' | 'plannedDate' | 'plannedWeek' | 'dueDate'
->
+  'taskId' | 'steps' | 'plannedDate' | 'plannedWeek' | 'dueDate' | 'pomodoroEnabled'
+>>
 
 /** `POST /api/tasks/:id/status` 的请求体 */
 export interface SetTaskStatusInput {
@@ -353,6 +348,7 @@ export interface ProjectView extends ProjectInterval {
   readonly projectId: string
   readonly name: string
   readonly isCurrent: boolean
+  readonly archived: boolean
   /** 派生状态（ADR-016 §4） */
   readonly state: 'upcoming' | 'active' | 'ended'
   readonly createdAt: string

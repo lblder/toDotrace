@@ -23,7 +23,8 @@
 import { addDays, compareDayKey, isDayKey, weekEnd } from '@shared/time'
 import type { DayKey } from '@shared/time'
 
-import { resolveInstance } from './rounds'
+import { effectiveCompletions, resolveInstance, scheduledOccurrenceDateOf } from './rounds'
+import type { ResolvedInstance } from './rounds'
 import type {
   OccurrenceEvent,
   ProjectedTask,
@@ -383,8 +384,21 @@ function buildOne(
   events: readonly OccurrenceEvent[],
   checks: ReadonlyMap<string, string>,
   today: DayKey,
+  completedOccurrence?: OccurrenceEvent & { type: 'task/occurrence-completed' },
+  context?: { current: ResolvedInstance; scheduled: DayKey | null },
 ): TodoItem {
-  const instance = resolveInstance(task, events, today)
+  const current = context?.current ?? resolveInstance(task, events, today)
+  const scheduled = context === undefined
+    ? scheduledOccurrenceDateOf(task, events, today, current)
+    : context.scheduled
+  const instance = completedOccurrence === undefined
+    ? current
+    : {
+        ...current,
+        occurrenceKey: completedOccurrence.payload.originalPlannedDate,
+        completion: completedOccurrence,
+        pending: null,
+      }
   const recurring = task.recurrence !== null
 
   const steps: TodoItemStep[] = task.steps.map((step) => ({
@@ -399,6 +413,7 @@ function buildOne(
   const skeleton: TodoItem = {
     taskId: task.id,
     occurrenceKey: instance.occurrenceKey,
+    scheduledOccurrenceDate: scheduled,
     title: task.title,
     notes: task.notes,
     importance: task.importance,
@@ -456,6 +471,28 @@ export function buildTodoItems(input: TodoReadInput): TodoItem[] {
   for (const task of input.tasks) {
     if (task.deletedAt !== null) continue
     items.push(buildOne(task, input.events, checks, input.today))
+  }
+  return items
+}
+
+/**
+ * 每个仍有效的完成实例各产出一行。它与 `buildTodoItems` 共用同一个构造函数，
+ * 因此步骤勾选、完成时刻、排序理由都针对该实例，而不是当前 `resolveInstance`。
+ * 已放弃任务的既有完成历史仍可查看；软删除任务从所有视图消失。
+ */
+export function buildCompletedTodoItems(input: TodoReadInput): TodoItem[] {
+  assertDayKey(input.today, 'today')
+  const checks = stepCheckLookup(input.stepChecks)
+  const items: TodoItem[] = []
+  for (const task of input.tasks) {
+    if (task.deletedAt !== null) continue
+    const current = resolveInstance(task, input.events, input.today)
+    const scheduled = scheduledOccurrenceDateOf(task, input.events, input.today, current)
+    for (const completion of effectiveCompletions(task, input.events)) {
+      // 完成事件是历史事实：任务后来移除/更换规则时，旧轮次可能不再属于
+      // 当前 roundsOf；仍须在历史中呈现（ADR-013 §3.3 的孤立历史）。
+      items.push(buildOne(task, input.events, checks, input.today, completion, { current, scheduled }))
+    }
   }
   return items
 }
