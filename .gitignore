@@ -20,3 +20,7 @@ playwright/.cache/
 
 # 开发工具 archify 的依赖（由 .agents/skills/archify/package-lock.json 还原）
 .agents/skills/archify/node_modules/
+
+# 离线发布产物与本机临时文件
+releases/
+__pycache__/

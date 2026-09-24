@@ -10,3 +10,5 @@ tests
 .codex
 *.log
 .DS_Store
+
+releases
