@@ -1,3 +1,4 @@
+import { getTrace } from '../trace/service.js'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -14,7 +15,7 @@ import { CHECKIN_ARRIVED_TYPE, CHECKIN_LEFT_TYPE } from '../events/definitions/c
 import { SETTINGS_UPDATED_TYPE } from '../events/definitions/settings.js'
 import { ApiError } from '../lib/errors.js'
 import { insertUser } from '../repo/users.js'
-import { arrive, leave, listDays, today } from '../checkin/service.js'
+import { arrive, leave, listDays, today, setAway } from '../checkin/service.js'
 
 /**
  * 打卡的域语义（ADR-012 §3 的幂等 / §5 的配对规则）。
@@ -314,6 +315,23 @@ describe('幂等：到达（ADR-012 §3）', () => {
 })
 
 describe('今日状态与连续天数（ADR-012 §3 / §6）', () => {
+  it('累计按账号和归属日计数：中断保留，重复到达、凌晨及离开不多计，重建后不变', () => {
+    const account = freshAccount()
+    const other = freshAccount()
+    expect(today(db, account, at('2026-09-20T09:00:00+08:00')).totalDays).toBe(0)
+    inTx(() => arrive(db, account, at('2026-09-20T23:00:00+08:00')))
+    inTx(() => arrive(db, account, at('2026-09-21T02:00:00+08:00')))
+    inTx(() => leave(db, account, at('2026-09-21T05:00:00+08:00')))
+    inTx(() => arrive(db, other, at('2026-09-21T09:00:00+08:00')))
+    const interrupted = today(db, account, at('2026-09-23T09:00:00+08:00'))
+    expect(interrupted).toMatchObject({ streak: 0, totalDays: 1 })
+    inTx(() => arrive(db, account, at('2026-09-23T09:00:00+08:00')))
+    expect(today(db, account, at('2026-09-23T10:00:00+08:00'))).toMatchObject({ streak: 1, totalDays: 2 })
+    rebuildProjection(db, account)
+    expect(today(db, account, at('2026-09-23T10:00:00+08:00')).totalDays).toBe(2)
+    expect(today(db, other, at('2026-09-23T10:00:00+08:00')).totalDays).toBe(1)
+  })
+
   it('没有到达 → day 为 null（休息日）、streak 为 0', () => {
     const account = freshAccount()
     const state = today(db, account, at('2026-09-22T09:00:00+08:00'))
@@ -503,5 +521,46 @@ describe('★ occurred_at 的偏移取自账号时区（ADR-010 §1）', () => {
     expect(left.dayKey).toBe(
       readAccountEvents(db, account).find((event) => event.type === CHECKIN_ARRIVED_TYPE)!.dayKey,
     )
+  })
+})
+
+describe('暂离与返回', () => {
+  it('多次暂离持久化并可重放，轨迹扣除暂离，天数与账号保持独立', () => {
+    const account = freshAccount()
+    const other = freshAccount()
+    const run = (time: string, away: boolean) => inTx(() => setAway(db, account, at(`2026-09-22T${time}+08:00`), away))
+    inTx(() => arrive(db, account, at('2026-09-22T09:00:00+08:00')))
+    expect(run('10:00:00', true).created).toBe(true)
+    expect(run('10:05:00', true).created).toBe(false)
+    expect(run('10:30:00', false).created).toBe(true)
+    expect(run('10:35:00', false).created).toBe(false)
+    run('12:00:00', true)
+    run('13:00:00', false)
+    inTx(() => leave(db, account, at('2026-09-22T17:00:00+08:00')))
+    const before = readProjection(db, account)
+    rebuildProjection(db, account)
+    expect(readProjection(db, account)).toEqual(before)
+    expect(today(db, account, at('2026-09-22T18:00:00+08:00')).totalDays).toBe(1)
+    expect(today(db, other, at('2026-09-22T18:00:00+08:00')).day).toBeNull()
+    const trace = getTrace(db, account, at('2026-09-22T18:00:00+08:00'), { period: 'week', goalMinutes: 480 })
+    expect(trace.days.find(day => day.dayKey === '2026-09-22')?.durationMinutes).toBe(390)
+    expect(trace.totals.totalDurationMinutes).toBe(390)
+    expect(() => run('18:00:00', true)).toThrow()
+    expect(() => inTx(() => setAway(db, other, at('2026-09-22T18:00:00+08:00'), false))).toThrow()
+  })
+
+  it('跨日仍能返回；暂离中结束打卡会闭合暂离区间', () => {
+    const account = freshAccount()
+    inTx(() => arrive(db, account, at('2026-09-22T23:00:00+08:00')))
+    inTx(() => setAway(db, account, at('2026-09-23T03:00:00+08:00'), true))
+    expect(today(db, account, at('2026-09-23T05:00:00+08:00')).activeDay?.breaks?.[0]?.endedAt).toBeNull()
+    const returned = inTx(() => setAway(db, account, at('2026-09-23T05:00:00+08:00'), false))
+    expect(returned.day.dayKey).toBe('2026-09-22')
+    inTx(() => setAway(db, account, at('2026-09-23T06:00:00+08:00'), true))
+    const left = inTx(() => leave(db, account, at('2026-09-23T07:00:00+08:00')))
+    expect(left.day.breaks?.[1]?.endedAt).toBe(left.day.leftAt)
+    expect(today(db, account, at('2026-09-23T07:00:00+08:00')).activeDay).toBeUndefined()
+    const trace = getTrace(db, account, at('2026-09-23T08:00:00+08:00'), { period: 'week', goalMinutes: 480 })
+    expect(trace.days.find(day => day.dayKey === '2026-09-22')?.durationMinutes).toBe(300)
   })
 })

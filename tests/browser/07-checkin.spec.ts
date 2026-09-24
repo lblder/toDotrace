@@ -94,6 +94,7 @@ test.describe.serial('打卡链路', () => {
     // 休息日呈现：不是错误态、不是空白，也不带评判（ADR-012 §5 / 01 FR1）
     await expect(checkin.locator('.ta-checkin__restMain')).toHaveText('尚未打卡')
     await expect(checkin.locator('.ta-checkin__streakNumber')).toHaveText('0')
+    await expect(checkin.locator('.ta-checkin__totalNumber')).toHaveText('0')
 
     // 休息日正是打卡的起点：按钮就在这儿（02 §3 的流程图）
     await expect(checkin.getByRole('button', { name: '到达实验室' })).toBeVisible()
@@ -125,6 +126,8 @@ test.describe.serial('打卡链路', () => {
     // 章出现了，但**没有**重放动效：仪式只属于真正落笔的那一下
     await expect(checkin.locator('.ta-checkin__stamp')).toBeVisible()
     expect(await stampStyle(checkin, 'animation-name'), '幂等命中不该压第二次章').toBe('none')
+    await expect(checkin.locator('.ta-checkin__quote')).toHaveCount(0)
+    await expect(checkin.locator('.ta-checkin__totalNumber')).toHaveText('1')
 
     // 界面显示的归属日就是服务端固化的那一个（凌晨归前一天之类都由它体现，前端不自己算）
     await expect(checkin.locator('.ta-checkin__fact', { hasText: '归属日' })).toContainText(
@@ -147,6 +150,8 @@ test.describe.serial('打卡链路', () => {
     )
     // 刷新是重取，不是「又打了一次卡」：动效不重放（§7：其余动效克制）
     expect(await stampStyle(checkin, 'animation-name'), '刷新不该重放仪式').toBe('none')
+    await expect(checkin.locator('.ta-checkin__quote')).toHaveCount(0)
+    await expect(checkin.locator('.ta-checkin__totalNumber')).toHaveText('1')
 
     // 已经到达，就不再提供到达入口；离开是可选的，入口在
     await expect(checkin.getByRole('button', { name: '到达实验室' })).toHaveCount(0)
@@ -166,6 +171,9 @@ test.describe.serial('打卡链路', () => {
     await expect(checkin.getByRole('button', { name: '离开实验室' })).toHaveCount(0)
     await expect(checkin.getByRole('button', { name: '到达实验室' })).toHaveCount(0)
     await expect(checkin.locator('.ta-checkin__hint')).toContainText('今日打卡已完成')
+    await expect(checkin.locator('.ta-checkin__quote')).toBeVisible()
+    await expect(checkin.locator('.ta-checkin__totalNumber')).toHaveText('1')
+    await checkin.screenshot({ path: test.info().outputPath('checkin-desktop.png'), fullPage: true })
   })
 
   test('5. 主题切换：印章的颜色跟着令牌走，不是写死的', async () => {
@@ -204,6 +212,10 @@ test.describe.serial('打卡链路', () => {
 
     await page.getByRole('button', { name: '到达实验室' }).click()
     await expect(page.getByRole('status')).toContainText('已记录到达')
+    await expect(page.locator('.ta-checkin__quote')).toBeVisible()
+    await expect(page.getByRole('link', { name: '查看出处' })).toHaveCount(0)
+    await expect(page.locator('.ta-checkin__totalNumber')).toHaveText('1')
+    expect(await page.locator('.ta-checkin__celebration').evaluate(el => getComputedStyle(el).animationName)).toBe('none')
 
     // 动效关了 ≠ 章没了：静态样式就是终态，信息一点不少
     await expect(page.locator('.ta-checkin__stamp')).toBeVisible()
@@ -215,6 +227,28 @@ test.describe.serial('打卡链路', () => {
       '减少动效时压章动画的时长必须是 0',
     ).toBe(0)
 
+    await page.setViewportSize({ width: 375, height: 812 })
+    await expect(page.getByRole('button', { name: '收起打卡寄语' })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.screenshot({ path: test.info().outputPath('checkin-mobile.png'), fullPage: true })
+    await page.getByRole('button', { name: '收起打卡寄语' }).click()
+    await expect(page.locator('.ta-checkin__quote')).toHaveCount(0)
+    await page.reload()
+    await expect(page.locator('.ta-checkin__totalNumber')).toHaveText('1')
+    await expect(page.locator('.ta-checkin__quote')).toHaveCount(0)
+    await page.getByRole('button', { name: '暂离实验室', exact: true }).click()
+    await expect(page.getByRole('button', { name: '返回实验室' })).toBeVisible()
+    await page.reload()
+    await expect(page.getByRole('button', { name: '返回实验室' })).toBeVisible()
+    await page.getByRole('button', { name: '返回实验室' }).click()
+    await expect(page.getByRole('button', { name: '暂离实验室', exact: true })).toBeVisible()
+    await expect(page.locator('.ta-checkin__totalNumber')).toHaveText('1')
+    await page.getByRole('button', { name: '暂离实验室', exact: true }).click()
+    await expect(page.getByRole('button', { name: '返回实验室' })).toBeVisible()
+    await page.getByRole('button', { name: '离开实验室', exact: true }).click()
+    await expect(page.getByRole('button', { name: '返回实验室' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '暂离实验室', exact: true })).toHaveCount(0)
+    await expect(page.locator('.ta-checkin__totalNumber')).toHaveText('1')
     await context.close()
   })
 

@@ -1,0 +1,12 @@
+.git
+.zcode
+node_modules
+data
+test-results
+playwright-report
+docs
+tests
+.agents
+.codex
+*.log
+.DS_Store

@@ -145,6 +145,12 @@ export const api = {
    *     都走幂等而不是报错，界面据此如实说出第一次记录的时刻。
    * 这两种情形在投影上本是同一个状态，只有换掉分流键才能让幂等与 409 同时成立。
    */
+  awayCheckin(): Promise<CheckinResult> {
+    return request<CheckinResult>({ method: 'POST', path: '/api/checkin/away', auth: true })
+  },
+  returnCheckin(): Promise<CheckinResult> {
+    return request<CheckinResult>({ method: 'POST', path: '/api/checkin/return', auth: true })
+  },
   leaveCheckin(): Promise<CheckinResult> {
     return request<CheckinResult>({ method: 'POST', path: '/api/checkin/leave', auth: true })
   },

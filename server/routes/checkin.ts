@@ -1,7 +1,7 @@
 import { Router, type Request, type RequestHandler } from 'express'
 import { z } from 'zod'
 import { compareDayKey, diffDays, isDayKey, type DayKey } from '@shared/time'
-import { arrive, leave, listDays, today } from '../checkin/service.js'
+import { arrive, leave, listDays, today, setAway } from '../checkin/service.js'
 import { getNote, putNote } from '../checkin/notes.js'
 import type { Db } from '../db/connection.js'
 import { invalidInput } from '../lib/errors.js'
@@ -125,6 +125,14 @@ export function checkinRoutes(db: Db, requireAuth: RequestHandler): Router {
     const result = db.transaction(() => leave(db, accountId, new Date()))()
     res.status(200).json(result)
   })
+
+  for (const [route, away] of [['/away', true], ['/return', false]] as const) {
+    router.post(route, (req, res) => {
+      assertNoBody(req.body)
+      const accountId = getAuth(req).user.id
+      res.json(db.transaction(() => setAway(db, accountId, new Date(), away))())
+    })
+  }
 
   router.get('/today', (req, res) => {
     const accountId = getAuth(req).user.id

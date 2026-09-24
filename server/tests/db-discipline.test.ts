@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { openDatabase, openMigratedDatabase, type Db } from '../db/index.js'
-import { getSchemaVersion, migrate, SCHEMA_VERSION } from '../db/schema.js'
+import { getSchemaVersion, migrate, SCHEMA_VERSION, allDdl } from '../db/schema.js'
 import { insertSession, countSessionsForUser } from '../repo/sessions.js'
 import { insertInvite, findInviteByCodeHash } from '../repo/invites.js'
 import { insertUser } from '../repo/users.js'
@@ -135,4 +135,18 @@ describe('级联删除（外键真的生效）', () => {
       }),
     ).toThrow(/FOREIGN KEY/i)
   })
+})
+
+
+it('v4 数据库升级保留原打卡，并初始化空暂离记录', () => {
+  const legacy = openDatabase(path.join(dir, 'legacy-v4.db'))
+  try {
+    for (const ddl of allDdl().slice(0, 4)) legacy.exec(ddl)
+    legacy.pragma('user_version = 4')
+    insertUser(legacy, { id: 'legacy', username: 'legacy', displayName: 'legacy', role: 'member', passwordHash: 'hash', createdAt: '2026-09-22T09:00:00+08:00' })
+    legacy.prepare('INSERT INTO days (account_id, day_key, arrived_at, left_at) VALUES (?, ?, ?, ?)').run('legacy', '2026-09-22', '2026-09-22T09:00:00+08:00', null)
+    migrate(legacy)
+    expect(legacy.prepare('SELECT arrived_at, left_at, breaks_json FROM days').get()).toEqual({ arrived_at: '2026-09-22T09:00:00+08:00', left_at: null, breaks_json: '[]' })
+    expect(migrate(legacy)).toBe(SCHEMA_VERSION)
+  } finally { legacy.close() }
 })

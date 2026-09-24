@@ -11,7 +11,7 @@ import type { Db } from './connection.js'
  *         ADR-017 §6（day_notes）——**同一次迁移的三半**，不是先后三次改动。
  */
 
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 const DDL_V1 = `
 CREATE TABLE users (
@@ -252,9 +252,12 @@ CREATE TABLE day_notes (
 );
 `
 
-/** 全部版本的 DDL 文本，按版本升序（纪律测试据此自动发现表名，见下）。 */
+/** 暂离区间属于可重建的打卡投影，旧记录以空数组兼容。 */
+const DDL_V5 = `ALTER TABLE days ADD COLUMN breaks_json TEXT NOT NULL DEFAULT '[]';`
+
+/** 全部版本的 DDL 文本，按版本升序。 */
 export function allDdl(): readonly string[] {
-  return [DDL_V1, DDL_V2, DDL_V3, DDL_V4]
+  return [DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V5]
 }
 
 /** 读取当前模式版本。 */
@@ -333,6 +336,8 @@ export function migrate(db: Db): number {
       db.exec(DDL_V4)
     }
     // user_version 的写入同样在事务内，与建表同生共死。
+    if (current < 5) db.exec(DDL_V5)
+
     db.pragma(`user_version = ${SCHEMA_VERSION}`)
   })
   upgrade()

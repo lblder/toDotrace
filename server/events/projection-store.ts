@@ -46,6 +46,7 @@ interface DayRow {
   day_key: string
   arrived_at: string
   left_at: string | null
+  breaks_json: string
 }
 
 interface TaskRow {
@@ -199,7 +200,7 @@ export function readDayNoteRows(db: Db, accountId: string): ProjectedDayNote[] {
 export function readDayRows(db: Db, accountId: string): ProjectedDay[] {
   const rows = db
     .prepare(
-      'SELECT account_id, day_key, arrived_at, left_at FROM days WHERE account_id = ? ORDER BY day_key',
+      'SELECT account_id, day_key, arrived_at, left_at, breaks_json FROM days WHERE account_id = ? ORDER BY day_key',
     )
     .all(accountId) as DayRow[]
 
@@ -208,6 +209,7 @@ export function readDayRows(db: Db, accountId: string): ProjectedDay[] {
     dayKey: row.day_key as DayKey,
     arrivedAt: row.arrived_at,
     leftAt: row.left_at,
+    ...(row.breaks_json === '[]' ? {} : { breaks: JSON.parse(row.breaks_json) as NonNullable<ProjectedDay['breaks']> }),
   }))
 }
 
@@ -339,7 +341,7 @@ function writeProjectRows(db: Db, accountId: string, projects: readonly Projecte
 
 function writeDayRows(db: Db, accountId: string, days: readonly ProjectedDay[]): void {
   const insertDay = db.prepare(
-    'INSERT INTO days (account_id, day_key, arrived_at, left_at) VALUES (?, ?, ?, ?)',
+    'INSERT INTO days (account_id, day_key, arrived_at, left_at, breaks_json) VALUES (?, ?, ?, ?, ?)',
   )
   for (const day of days) {
     if (day.accountId !== accountId) {
@@ -355,7 +357,7 @@ function writeDayRows(db: Db, accountId: string, days: readonly ProjectedDay[]):
           '不能写进投影表：每一行必有到达是 ADR-012 §2 的结构约束。',
       )
     }
-    insertDay.run(accountId, day.dayKey, day.arrivedAt, day.leftAt)
+    insertDay.run(accountId, day.dayKey, day.arrivedAt, day.leftAt, JSON.stringify(day.breaks ?? []))
   }
 }
 

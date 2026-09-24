@@ -2,12 +2,12 @@ import { compareDayKey, toDayKey, type DayKey } from '@shared/time'
 import { currentStreak } from '@shared/checkin'
 import type { Db } from '../db/connection.js'
 import { appendEvents } from '../events/append.js'
-import { CHECKIN_ARRIVED_TYPE, CHECKIN_LEFT_TYPE } from '../events/definitions/checkin.js'
+import { CHECKIN_ARRIVED_TYPE, CHECKIN_LEFT_TYPE, CHECKIN_AWAY_TYPE, CHECKIN_RETURNED_TYPE } from '../events/definitions/checkin.js'
 import { readProjection } from '../events/projection-store.js'
 import { loadAccountSettings, timeContextOf } from '../events/settings.js'
 import { assertInTransaction } from '../events/transaction.js'
 import type { ProjectedDay } from '../events/types.js'
-import { notArrived } from '../lib/errors.js'
+import { notArrived, conflict } from '../lib/errors.js'
 import { toIsoInZone } from '../lib/time.js'
 
 /**
@@ -39,12 +39,13 @@ import { toIsoInZone } from '../lib/time.js'
  * 从无到达才是 409，有过到达但已闭合是幂等。见 `leave()` 的分流表。
  */
 
-/** 对外的打卡日形态（ADR-012 §3 的 `DayRow`）：**只有这三个字段**，不带账号标识。 */
+/** 对外的打卡日形态（ADR-012 §3 的 `DayRow`），不带账号标识；有暂离时包含区间。 */
 export interface DayRow {
   dayKey: DayKey
   arrivedAt: string
   /** `null` = 尚未离开（时长未知，FR1） */
   leftAt: string | null
+  breaks?: { startedAt: string; endedAt: string | null }[]
 }
 
 export interface CheckinResult {
@@ -55,8 +56,10 @@ export interface CheckinResult {
 
 /** 今日状态（ADR-012 §5：休息日就是 `day: null`，不另设 `isRestDay` 字段）。 */
 export interface TodayResult {
+  activeDay?: DayRow
   day: DayRow | null
   streak: number
+  totalDays: number
 }
 
 /** 一次到达（ADR-012 §3 的 `POST /api/checkin/arrive`）。**调用方必须已在事务内。** */
@@ -166,8 +169,12 @@ export function today(db: Db, accountId: string, now: Date): TodayResult {
   const projection = readProjection(db, accountId)
 
   const day = projection.days.find((row) => row.dayKey === dayKey)
+  const latest = projection.days.at(-1)
   return {
     day: day === undefined ? null : toDayRow(day),
+    ...(day === undefined && latest?.leftAt === null ? { activeDay: toDayRow(latest) } : {}),
+    // days 按账号、归属日唯一；离开和重复请求不会增加天数。
+    totalDays: projection.days.length,
     // 连续天数由 `shared/checkin` 定义（ADR-012 §6）——**不在服务端另写一份**：
     // §5 明说「shared/checkin 里已有同名函数，两个实现即两个真相」。
     // 入参的 dayKeys 就是投影的打卡日（§6：来源必须是 `SELECT day_key FROM days …`，
@@ -225,9 +232,8 @@ function findLatestArrival(db: Db, accountId: string): ProjectedDay | null {
 }
 
 function toDayRow(day: ProjectedDay): DayRow {
-  // 显式构造而不是展开：返回体只含 ADR-012 §3 列的三个字段，
-  // `accountId` 不外泄（响应体「一律只含当前账号的数据」——多一个自己的 id 也无用）。
-  return { dayKey: day.dayKey, arrivedAt: day.arrivedAt, leftAt: day.leftAt }
+  // 显式构造响应，省略内部账号标识；旧记录无需附加空暂离列表。
+  return { dayKey: day.dayKey, arrivedAt: day.arrivedAt, leftAt: day.leftAt, ...(day.breaks?.length ? { breaks: day.breaks } : {}) }
 }
 
 /**
@@ -239,4 +245,23 @@ function projectionMissing(dayKey: DayKey): Error {
     `打卡事件已写入，但投影里没有 '${dayKey}' 这一行：` +
       '「投影 = 重放结果」这条不变式被破坏了（ADR-010 §4/§5）。',
   )
+}
+
+/** 暂离和返回沿用到达的归属日，不增加打卡天数。 */
+export function setAway(db: Db, accountId: string, now: Date, away: boolean): CheckinResult {
+  assertInTransaction(db, '打卡（暂离 / 返回）')
+  const latest = findLatestArrival(db, accountId)
+  if (latest === null) throw notArrived()
+  if (latest.leftAt !== null) throw conflict('conflict/status-transition', '本次打卡已结束。')
+  const isAway = latest.breaks?.at(-1)?.endedAt === null
+  if (isAway === away) return { day: toDayRow(latest), created: false }
+  const settings = loadAccountSettings(db, accountId)
+  appendEvents(db, accountId, [{
+    type: away ? CHECKIN_AWAY_TYPE : CHECKIN_RETURNED_TYPE,
+    occurredAt: toIsoInZone(now, settings.timeZone),
+    payload: {}, dayKey: latest.dayKey, dayStartHour: settings.dayStartHour,
+  }])
+  const written = findDay(db, accountId, latest.dayKey)
+  if (written === null) throw projectionMissing(latest.dayKey)
+  return { day: toDayRow(written), created: true }
 }

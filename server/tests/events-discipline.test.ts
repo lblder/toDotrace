@@ -263,6 +263,8 @@ describe('注册表（ADR-010 §2）', () => {
       // 故两列 target 为 NULL——与设置事件同类。
       'checkin/arrived': withoutTarget,
       'checkin/left': withoutTarget,
+      'checkin/away': withoutTarget,
+      'checkin/returned': withoutTarget,
       // 每日备注（ADR-017 §6）同理：`dayKey` 是日期值，不是某个实体的标识
       'note/updated': withoutTarget,
       // 任务事件的载荷都带 taskId，落点由载荷派生（ADR-013 §4）
@@ -745,7 +747,7 @@ describe('v3 → v4 迁移（ADR-013 §5）', () => {
                  '2026-09-22T10:00:00+08:00', '2026-09-23T10:00:00+08:00')`,
       ).run()
 
-      expect(migrate(db)).toBe(4)
+      expect(migrate(db)).toBe(SCHEMA_VERSION)
       const task = readProjection(db, 'u-m').tasks[0]!
       expect(task).toMatchObject({
         id: 't-old',
@@ -787,8 +789,8 @@ describe('v3 → v4 迁移（ADR-013 §5）', () => {
     const db = openV3Database(path.join(dir, 'clean.db'))
     try {
       seedUser(db, 'u-clean', 'userclean')
-      expect(migrate(db)).toBe(4)
-      expect(getSchemaVersion(db)).toBe(4)
+      expect(migrate(db)).toBe(SCHEMA_VERSION)
+      expect(getSchemaVersion(db)).toBe(SCHEMA_VERSION)
     } finally {
       db.close()
     }

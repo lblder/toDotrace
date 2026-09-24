@@ -129,7 +129,7 @@ export function leaveCheckin(stack: Stack, token: string): Promise<CheckinResult
 export function todayCheckin(
   stack: Stack,
   token: string,
-): Promise<{ day: DayRow | null; streak: number }> {
+): Promise<{ day: DayRow | null; streak: number; totalDays: number }> {
   return ok(stack, '/api/checkin/today', { token })
 }
 

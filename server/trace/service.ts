@@ -42,13 +42,17 @@ function ratio(numerator: number, denominator: number): TraceRatio {
   return { numerator, denominator, percent: denominator === 0 ? null : Math.min(100, Math.round(numerator / denominator * 100)) }
 }
 
-function durationOf(arrivedAt: string, leftAt: string | null): { minutes: number | null; needsReview: boolean } {
+function durationOf(arrivedAt: string, leftAt: string | null, breaks: { startedAt: string; endedAt: string | null }[] = []): { minutes: number | null; needsReview: boolean } {
   if (leftAt === null) return { minutes: null, needsReview: false }
   const elapsed = (Date.parse(leftAt) - Date.parse(arrivedAt)) / 60_000
   if (!Number.isFinite(elapsed) || elapsed <= 0 || elapsed >= 18 * 60) {
     return { minutes: null, needsReview: true }
   }
-  return { minutes: Math.round(elapsed), needsReview: false }
+  const away = breaks.reduce((sum, entry) => sum + Math.max(0,
+    Math.min(Date.parse(entry.endedAt ?? leftAt), Date.parse(leftAt)) -
+    Math.max(Date.parse(entry.startedAt), Date.parse(arrivedAt))), 0) / 60_000
+  if (!Number.isFinite(away) || away > elapsed) return { minutes: null, needsReview: true }
+  return { minutes: Math.round(elapsed - away), needsReview: false }
 }
 
 function localHour(iso: string): number | null {
@@ -86,7 +90,7 @@ function fillDays(keys: readonly DayKey[], today: DayKey, sources: Sources, comp
   const arrivalByDay = new Map(sources.projection.days.map((row) => [row.dayKey, row]))
   return keys.map((dayKey) => {
     const arrival = arrivalByDay.get(dayKey)
-    const duration = arrival === undefined ? { minutes: null, needsReview: false } : durationOf(arrival.arrivedAt, arrival.leftAt)
+    const duration = arrival === undefined ? { minutes: null, needsReview: false } : durationOf(arrival.arrivedAt, arrival.leftAt, arrival.breaks)
     const future = dayKey > today
     const completions = future ? [] : completedByDay.get(dayKey) ?? []
     return {

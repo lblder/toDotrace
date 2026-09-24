@@ -170,6 +170,7 @@ export interface ProjectedDay {
   arrivedAt: string
   /** 离开时刻；`null` = 尚未离开（时长未知，FR1） */
   leftAt: string | null
+  breaks?: { startedAt: string; endedAt: string | null }[]
 }
 
 /**

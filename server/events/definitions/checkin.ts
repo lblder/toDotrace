@@ -30,6 +30,8 @@ import { defineEvent, type EventDefinition, type Projection, type RegisteredDefi
 
 export const CHECKIN_ARRIVED_TYPE = 'checkin/arrived'
 export const CHECKIN_LEFT_TYPE = 'checkin/left'
+export const CHECKIN_AWAY_TYPE = 'checkin/away'
+export const CHECKIN_RETURNED_TYPE = 'checkin/returned'
 
 /**
  * 空载荷：`{}` 通过，多一个字段即拒绝。
@@ -66,6 +68,7 @@ export const checkinArrivedDefinition: EventDefinition<CheckinPayload> = defineE
       // 它服务的是导入与撤销后重打这两种来源。
       existing.arrivedAt = event.occurredAt
       existing.leftAt = null
+      delete existing.breaks
       return
     }
     projection.days.push({
@@ -95,11 +98,35 @@ export const checkinLeftDefinition: EventDefinition<CheckinPayload> = defineEven
     // 且该行已闭合时重复离开不写第二条事件（ADR-012 §3 的幂等 / §5 的分流表）；
     // 折叠这一层只负责「后来者覆盖」。
     existing.leftAt = event.occurredAt
+    const active = existing.breaks?.at(-1)
+    if (active?.endedAt === null) active.endedAt = event.occurredAt
   },
 })
 
-/** 阶段 3 登记的打卡事件定义 */
+const checkinAwayDefinition = defineEvent({
+  type: CHECKIN_AWAY_TYPE,
+  schema: checkinPayloadSchema,
+  apply(projection, event) {
+    const day = findDay(projection, event.dayKey)
+    if (!day || day.leftAt !== null || day.breaks?.at(-1)?.endedAt === null) return
+    ;(day.breaks ??= []).push({ startedAt: event.occurredAt, endedAt: null })
+  },
+})
+
+const checkinReturnedDefinition = defineEvent({
+  type: CHECKIN_RETURNED_TYPE,
+  schema: checkinPayloadSchema,
+  apply(projection, event) {
+    const day = findDay(projection, event.dayKey)
+    const active = day?.breaks?.at(-1)
+    if (day?.leftAt === null && active?.endedAt === null) active.endedAt = event.occurredAt
+  },
+})
+
+/** 打卡事件定义 */
 export const checkinEventDefinitions: readonly RegisteredDefinition[] = [
   checkinArrivedDefinition,
   checkinLeftDefinition,
+  checkinAwayDefinition,
+  checkinReturnedDefinition,
 ]

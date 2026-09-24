@@ -1,6 +1,11 @@
 /* 打卡页：今日状态 + 印章 + 连续天数。
    颜色、间距、圆角、时长全部走 tokens.css；此处不出现字面色值。 */
 
+:root {
+  --dur-checkin-reveal: 350ms;
+  --ease-checkin-reveal: cubic-bezier(.4, 0, .2, 1);
+}
+
 /* --- 页头 -------------------------------------------------------------- */
 
 .ta-checkin__today {
@@ -234,6 +239,79 @@
 
 /* --- 连续天数 ---------------------------------------------------------- */
 
+.ta-checkin__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4) var(--space-5);
+}
+
+.ta-checkin__total {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-left: 1px solid var(--c-border);
+  padding-left: var(--space-5);
+}
+
+.ta-checkin__stats > .ta-checkin__streakNote {
+  grid-column: 1 / -1;
+}
+
+.ta-checkin__celebration {
+  padding: var(--space-4) var(--space-5);
+  border-left: 3px solid var(--c-primary);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--c-bg-sunken);
+  animation: ta-checkin-reveal var(--dur-checkin-reveal) var(--ease-checkin-reveal);
+}
+
+.ta-checkin__celebrationHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-muted);
+}
+
+.ta-checkin__dismiss {
+  flex-shrink: 0;
+  min-height: 44px;
+}
+
+.ta-checkin__quote {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-readout);
+  font-size: clamp(1.125rem, 2.4vw, 1.5rem);
+  line-height: 1.7;
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+.ta-checkin__quoteSource {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1);
+  margin: var(--space-3) 0 0;
+  color: var(--c-ink-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+}
+
+.ta-checkin__quoteSource cite { font-style: normal; }
+
+
+
+@keyframes ta-checkin-reveal {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ta-checkin__celebration { animation: none; }
+}
+
 .ta-checkin__streak {
   display: flex;
   flex-direction: column;
@@ -253,7 +331,8 @@
   color: var(--c-ink);
 }
 
-.ta-checkin__streakNumber {
+.ta-checkin__streakNumber,
+.ta-checkin__totalNumber {
   font-size: var(--fs-3xl);
   line-height: var(--lh-tight);
   color: var(--c-primary-text);

@@ -139,6 +139,7 @@ export interface DayRow {
   readonly dayKey: string
   readonly arrivedAt: string
   readonly leftAt: string | null
+  readonly breaks?: { startedAt: string; endedAt: string | null }[]
 }
 
 /**
@@ -162,8 +163,10 @@ export interface CheckinResult {
  * 响应里没有 `isRestDay` 字段：它完全由 `day === null` 决定（v1.1 删去了这个冗余）。
  */
 export interface TodayCheckin {
+  readonly activeDay?: DayRow
   readonly day: DayRow | null
   readonly streak: number
+  readonly totalDays: number
 }
 
 /* -------------------------------------------------------------------------

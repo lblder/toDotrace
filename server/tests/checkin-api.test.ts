@@ -175,7 +175,7 @@ describe('GET /today（ADR-012 §3/§5）', () => {
 
     expect(res.status).toBe(200)
     // §5：休息日不另设 isRestDay 字段，day === null 就是它
-    expect(res.body).toEqual({ day: null, streak: 0 })
+    expect(res.body).toEqual({ day: null, streak: 0, totalDays: 0 })
   })
 
   it('已打卡：day 有值、streak 从 1 起', async () => {
@@ -396,4 +396,23 @@ describe('★ 接线：HTTP 打卡之后，days 投影 == 全量重建结果（A
     })
     expect(before.body.days).toEqual([left.body.day])
   })
+})
+
+
+it('暂离接口需要认证，按当前账号操作，并拒绝未到达状态', async () => {
+  const account = await freshMember()
+  const other = await freshMember()
+  for (const route of ['/away', '/return']) {
+    expect((await api(ctx, 'POST', '/api/checkin' + route)).status).toBe(401)
+    expect((await api(ctx, 'POST', '/api/checkin' + route, { token: account.token })).status).toBe(409)
+  }
+  await api(ctx, 'POST', '/api/checkin/arrive', { token: account.token })
+  const away = await api(ctx, 'POST', '/api/checkin/away', { token: account.token })
+  expect(away.status).toBe(200)
+  expect(away.body.day.breaks[0].endedAt).toBeNull()
+  expect((await api(ctx, 'POST', '/api/checkin/away', { token: account.token })).body.created).toBe(false)
+  expect((await api(ctx, 'GET', '/api/checkin/today', { token: other.token })).body.day).toBeNull()
+  const returned = await api(ctx, 'POST', '/api/checkin/return', { token: account.token })
+  expect(returned.status).toBe(200)
+  expect(returned.body.day.breaks[0].endedAt).not.toBeNull()
 })
