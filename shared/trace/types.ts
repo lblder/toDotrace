@@ -19,6 +19,7 @@ export interface TraceDay {
   left: string | null
   durationMinutes: number | null
   durationNeedsReview: boolean
+  focusSeconds: number
 }
 
 export interface TraceTrendPoint {
@@ -57,6 +58,7 @@ export interface TraceProjectSummary {
 
 export interface TracePayload {
   today: DayKey
+  focusRunning: boolean
   period: TracePeriod
   range: { from: DayKey; to: DayKey }
   goalMinutes: number
@@ -72,6 +74,7 @@ export interface TracePayload {
     validDurationDays: number
     durationNeedsReviewDays: number
     totalDurationMinutes: number
+    totalFocusSeconds: number
   }
   weekdays: number[]
   arrivals: number[]

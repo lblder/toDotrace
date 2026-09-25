@@ -1,7 +1,8 @@
-import { addDays, diffDays, parseDayKey, today as accountToday, weekEnd, weekStart, type DayKey } from '@shared/time'
+import { toDayKey, dayEndInstant, addDays, diffDays, parseDayKey, today as accountToday, weekEnd, weekStart, type DayKey } from '@shared/time'
 import { effectiveCompletions, resolveInstance } from '@shared/tasks/rounds'
 import type { OccurrenceCompletedPayload, ProjectedTask } from '@shared/tasks/types'
 import type { TraceDay, TracePayload, TracePeriod, TraceRatio, TraceScore, TraceTaskRecord } from '@shared/trace/types'
+import { foldTimerEvents } from '../timer/service.js'
 import type { Db } from '../db/connection.js'
 import { loadAccountSettings, timeContextOf } from '../events/settings.js'
 import { notFound } from '../lib/errors.js'
@@ -86,7 +87,7 @@ function deadlinesAtCompletion(events: Sources['events']): Map<string, DayKey | 
   return deadlines
 }
 
-function fillDays(keys: readonly DayKey[], today: DayKey, sources: Sources, completedByDay: Map<DayKey, TraceTaskRecord[]>, createdByDay: Map<DayKey, number>): TraceDay[] {
+function fillDays(keys: readonly DayKey[], today: DayKey, sources: Sources, completedByDay: Map<DayKey, TraceTaskRecord[]>, createdByDay: Map<DayKey, number>, focusByDay: Map<DayKey, number>): TraceDay[] {
   const arrivalByDay = new Map(sources.projection.days.map((row) => [row.dayKey, row]))
   return keys.map((dayKey) => {
     const arrival = arrivalByDay.get(dayKey)
@@ -103,6 +104,7 @@ function fillDays(keys: readonly DayKey[], today: DayKey, sources: Sources, comp
       left: future ? null : arrival?.leftAt ?? null,
       durationMinutes: future ? null : duration.minutes,
       durationNeedsReview: future ? false : duration.needsReview,
+      focusSeconds: future ? 0 : Math.floor((focusByDay.get(dayKey) ?? 0) / 1000),
     }
   })
 }
@@ -222,11 +224,33 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
     completedByDay.set(event.dayKey, list)
   }
 
+  // 依据开始事件固化的时区和日界分摊跨日片段，暂停期间不累计。
+  // 使用已有计时事件，包含未完成任务和已删除任务的真实专注历史。
+  const timer = foldTimerEvents(sources.events)
+  const starts = new Map(sources.events.filter(e => e.type === 'task/timer-started').map(e => [e.id, e]))
+  const focusByDay = new Map<DayKey, number>()
+  const sessions = [...timer.sessions, ...(timer.active === null ? [] : [{ ...timer.active, stoppedAt: now.toISOString() }])]
+  for (const session of sessions) {
+    const start = starts.get(session.sessionId)
+    if (!start) continue
+    const ctx = { timeZone: start.timezone, dayStartHour: start.dayStartHour }
+    let cursor = Date.parse(session.startedAt)
+    const end = Math.min(Date.parse(session.stoppedAt), now.getTime())
+    while (cursor < end) {
+      const key = toDayKey(new Date(cursor), ctx)
+      const boundary = dayEndInstant(key, ctx).getTime()
+      const next = Math.min(end, boundary)
+      if (next <= cursor) break
+      focusByDay.set(key, (focusByDay.get(key) ?? 0) + next - cursor)
+      cursor = next
+    }
+  }
+
   const heatmapEnd = weekEnd(today)
   const heatmapStart = addDays(heatmapEnd, -370)
-  const heatmap = fillDays(dayList(heatmapStart, heatmapEnd), today, sources, completedByDay, createdByDay)
+  const heatmap = fillDays(dayList(heatmapStart, heatmapEnd), today, sources, completedByDay, createdByDay, focusByDay)
   const rangeEnd = range.to < today ? range.to : today
-  const days = fillDays(dayList(range.from, rangeEnd), today, sources, completedByDay, createdByDay)
+  const days = fillDays(dayList(range.from, rangeEnd), today, sources, completedByDay, createdByDay, focusByDay)
   const trend = trendOf(days, query.period)
   const score = scoreOf({ days, range, today, sources, createdTasks, goalMinutes: query.goalMinutes })
   const durationDays = days.filter((day) => day.durationMinutes !== null)
@@ -248,7 +272,7 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
   const owned = selected === null ? [] : liveTasks.filter((task) => task.projectId === selected.id)
   const occurrenceEvents = occurrenceEventsOf(sources.events)
   return {
-    today, period: query.period, range, goalMinutes: query.goalMinutes, heatmap, days,
+    today, focusRunning: timer.active !== null, period: query.period, range, goalMinutes: query.goalMinutes, heatmap, days,
     trend: trend.trend, trendUnit: trend.trendUnit, score,
     totals: {
       created: days.reduce((sum, day) => sum + day.created, 0),
@@ -256,6 +280,7 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
       checkinDays: days.filter((day) => day.arrival !== null).length,
       validDurationDays: durationDays.length,
       durationNeedsReviewDays: days.filter((day) => day.durationNeedsReview).length,
+      totalFocusSeconds: days.reduce((sum, day) => sum + day.focusSeconds, 0),
       totalDurationMinutes: durationDays.reduce((sum, day) => sum + (day.durationMinutes ?? 0), 0),
     },
     weekdays, arrivals, planTypes,

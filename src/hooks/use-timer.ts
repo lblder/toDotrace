@@ -65,9 +65,11 @@ export function TimerProvider({ children }: { readonly children: ReactNode }) {
 
   function accept(payload: SyncedTimer): void {
     client.setQueryData(TIMER_QUERY_KEY, payload)
+    void client.invalidateQueries({ queryKey: queryKeys.trace })
   }
   const start = useMutation<SyncedTimer, Error, StartTimerInput>({
     mutationFn: (input) => withServerClock(() => api.startTimer(input)),
+    onError: () => { void client.invalidateQueries({ queryKey: TIMER_QUERY_KEY }) },
     onSuccess: (payload) => {
       accept(payload)
       // 开始计时由后端显式把普通任务标记“进行中”；其他任务视图需立刻重读。

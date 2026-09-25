@@ -22,7 +22,7 @@ export function useTrace(query: TraceQueryInput, enabled = true) {
     enabled,
     retry: false,
     refetchOnWindowFocus: false,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: (query) => query.state.data?.focusRunning ? 15_000 : 5 * 60_000,
     refetchIntervalInBackground: false,
   })
   const refetchRef = useRef(result.refetch)

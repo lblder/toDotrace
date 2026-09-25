@@ -113,6 +113,7 @@ function DailyDetail({ day }: { day: TraceDay | null }) {
         <h3>当日打卡</h3>
         {day.arrival === null ? <p className="ta-trace__subtle">未打卡。</p> : <p className="ta-trace__checkinLine">{clock(day.arrival)} 到达 <span aria-hidden="true">→</span> {day.left === null ? '未记离开' : `${clock(day.left)} 离开`}</p>}
         {day.durationMinutes !== null && <p className="ta-trace__subtle">有效停留 {minutes(day.durationMinutes)}</p>}
+        <p className="ta-trace__subtle">专注 {focusDuration(day.focusSeconds)}</p>
         {day.durationNeedsReview && <p className="ta-trace__review">时长超过 18 小时或记录顺序异常，暂不计入投入度。</p>}
       </div>
     </div>
@@ -166,17 +167,31 @@ function Evaluation({ data }: { data: TracePayload }) {
   </section>
 }
 
+function focusDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600)
+  const mins = Math.floor(seconds % 3600 / 60)
+  const secs = seconds % 60
+  return hours > 0 ? `${hours} 小时 ${mins} 分` : mins > 0 ? `${mins} 分 ${secs} 秒` : `${secs} 秒`
+}
+
 function SupportingCharts({ data }: { data: TracePayload }) {
   const maxDuration = Math.max(data.goalMinutes, ...data.days.map((day) => day.durationMinutes ?? 0), 1)
   const durationDays = data.days.filter((day) => day.durationMinutes !== null)
+  const focusDays = data.days.filter((day) => day.focusSeconds > 0)
+  const maxFocus = Math.max(1, ...focusDays.map(day => day.focusSeconds))
   const weekdayNames = ['一', '二', '三', '四', '五', '六', '日']
   const maxWeekday = Math.max(1, ...data.weekdays)
   const arrivalMax = Math.max(1, ...data.arrivals)
   return <div className="ta-trace__supportGrid">
-    <section className="ta-trace__panel" aria-labelledby="trace-duration"><div className="ta-trace__panelHead"><div><h2 id="trace-duration">投入时长</h2></div><small>停留目标 {minutes(data.goalMinutes)} / 日</small></div>
+    <section className="ta-trace__panel" aria-labelledby="trace-duration"><div className="ta-trace__panelHead"><div><h2 id="trace-duration">在场时长</h2></div><small>停留目标 {minutes(data.goalMinutes)} / 日</small></div>
       {durationDays.length === 0 ? <p className="ta-trace__subtle">暂无完整的到达与离开记录。</p> : <div className="ta-trace__bars" role="img" aria-label="每日有效停留时长柱状图">{durationDays.slice(-31).map((day) => <div className="ta-trace__barColumn" key={day.dayKey} title={`${dayLabel(day.dayKey)}：${minutes(day.durationMinutes!)}`}><span style={{ height: `${Math.max(4, day.durationMinutes! / maxDuration * 100)}%` }} /></div>)}</div>}
-      <p className="ta-trace__footnote">按到达至离开计算，非专注时长。</p>
+      <p className="ta-trace__footnote">到达至离开，扣除暂离时间。</p>
       {data.totals.durationNeedsReviewDays > 0 && <p className="ta-trace__footnote">{data.totals.durationNeedsReviewDays} 天的时长待核对，未计分。</p>}
+    </section>
+    <section className="ta-trace__panel" aria-labelledby="trace-focus">
+      <div className="ta-trace__panelHead"><h2 id="trace-focus">专注时长</h2><small>{data.focusRunning ? '正在计时 · 每 15 秒更新' : '番茄计时累计'}</small></div>
+      {focusDays.length === 0 ? <p className="ta-trace__subtle">暂无专注记录。</p> : <div className="ta-trace__bars" role="img" aria-label="每日专注时长柱状图">{focusDays.slice(-31).map(day => <div className="ta-trace__barColumn" key={day.dayKey} title={`${dayLabel(day.dayKey)}：${focusDuration(day.focusSeconds)}`}><span style={{ height: `${Math.max(4, day.focusSeconds / maxFocus * 100)}%` }} /></div>)}</div>}
+      <p className="ta-trace__footnote">累计实际计时片段，跨日按日界拆分，暂停期间不计入。</p>
     </section>
     <section className="ta-trace__panel" aria-labelledby="trace-rhythm"><div className="ta-trace__panelHead"><div><h2 id="trace-rhythm">星期节律</h2></div><small>完成次数</small></div>
       <div className="ta-trace__weekdayBars">{data.weekdays.map((count, index) => <div key={index}><div className="ta-trace__weekdayTrack"><span style={{ height: `${count === 0 ? 0 : Math.max(8, count / maxWeekday * 100)}%` }} /></div><span className="ta-mono">{weekdayNames[index]}</span><small>{count}</small></div>)}</div>
@@ -223,7 +238,7 @@ export function TracePage() {
         <div className="ta-trace__heatLegend"><span>{mode === 'completed' ? '少' : '较晚'}</span>{[0, 1, 2, 3, 4, 5].map((level) => <i className={`ta-trace__heatCell--${level}`} key={level} />)}<span>{mode === 'completed' ? '多' : '较早'}</span>{mode === 'arrival' && <span className="ta-trace__restLegend"><i className="ta-trace__heatCell--rest" />休息日</span>}</div>
         <DailyDetail day={selectedDay} />
       </section>
-      <div className="ta-trace__summary" aria-label="本期概览"><div><small>新建计划</small><strong className="ta-readout">{data.totals.created}</strong></div><div><small>完成次数</small><strong className="ta-readout">{data.totals.completed}</strong></div><div><small>到达天数</small><strong className="ta-readout">{data.totals.checkinDays}</strong></div><div><small>有效停留</small><strong className="ta-readout">{minutes(data.totals.totalDurationMinutes)}</strong></div></div>
+      <div className="ta-trace__summary" aria-label="本期概览"><div><small>新建计划</small><strong className="ta-readout">{data.totals.created}</strong></div><div><small>完成次数</small><strong className="ta-readout">{data.totals.completed}</strong></div><div><small>到达天数</small><strong className="ta-readout">{data.totals.checkinDays}</strong></div><div><small>在场时长</small><strong className="ta-readout">{minutes(data.totals.totalDurationMinutes)}</strong></div><div><small>专注时长</small><strong className="ta-readout">{focusDuration(data.totals.totalFocusSeconds)}</strong></div></div>
       {data.project !== null && <p className="ta-trace__projectNote">当前统计：项目周期内的全账号活动。项目任务：{data.project.ownedCompleted} / {data.project.ownedTotal} 条已完成。</p>}
       <div className="ta-trace__mainGrid"><Trend data={data} /><Evaluation data={data} /></div>
       <SupportingCharts data={data} />

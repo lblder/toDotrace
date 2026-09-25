@@ -14,7 +14,7 @@ import {
 import { taskStatusChangedDefinition } from '../events/definitions/tasks.js'
 import { readAccountEvents } from '../events/event-store.js'
 import { foldedEvents } from '../events/project.js'
-import { readTaskRows } from '../events/projection-store.js'
+import { readDayRows, readTaskRows } from '../events/projection-store.js'
 import { loadAccountSettings, timeContextOf } from '../events/settings.js'
 import { assertInTransaction } from '../events/transaction.js'
 import type { Event, EventDraft } from '../events/types.js'
@@ -60,6 +60,9 @@ export function foldTimerEvents(events: readonly Event[]): TimerState {
         occurrenceKey: payload.occurrenceKey,
         startedAt: event.occurredAt,
       }
+    } else if (event.type === 'checkin/away' || event.type === 'checkin/left') {
+      // 兼容旧版本没有显式停止事件的历史记录。
+      stopActive(event.occurredAt)
     } else if (event.type === TIMER_STOPPED_TYPE) {
       const payload = event.payload as TimerStoppedPayload
       if (active?.sessionId === payload.sessionId && active.taskId === payload.taskId) {
@@ -123,6 +126,13 @@ export function stopDraftForTask(
   return draftOf(db, accountId, now, TIMER_STOPPED_TYPE, { taskId, sessionId: active.sessionId })
 }
 
+/** 与打卡动作共用事务；独立停止批次避免撤销打卡时恢复实际计时。 */
+export function stopActiveTimer(db: Db, accountId: string, now: Date): void {
+  assertInTransaction(db, '停止当前专注')
+  const active = stateOf(db, accountId).active
+  if (active !== null) pauseTimer(db, accountId, now, active.sessionId)
+}
+
 export function configureTimer(
   db: Db,
   accountId: string,
@@ -152,6 +162,10 @@ export function startTimer(
 ): TimerSnapshot {
   assertInTransaction(db, '开始任务计时')
   const task = taskOf(db, accountId, taskId)
+  const visit = readDayRows(db, accountId).at(-1)
+  if (visit?.leftAt === null && visit.breaks?.at(-1)?.endedAt === null) {
+    throw conflict('conflict/status-transition', '当前处于暂离状态，请返回实验室后再开始计时')
+  }
   const state = stateOf(db, accountId)
   if (state.active?.taskId === taskId && state.active.occurrenceKey === occurrenceKey) {
     return timerSnapshot(db, accountId, now)

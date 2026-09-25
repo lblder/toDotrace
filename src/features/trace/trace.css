@@ -59,7 +59,7 @@
 .ta-trace__checkinLine { display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--c-ink); }
 .ta-trace__checkinLine span { color: var(--c-primary-text); }
 .ta-trace__review { margin-top: var(--space-2); color: var(--c-overdue-text); font-size: var(--fs-sm); }
-.ta-trace__summary { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border); }
+.ta-trace__summary { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border); }
 .ta-trace__summary > div { display: grid; gap: var(--space-1); padding: var(--space-4) var(--space-5); border-right: 1px solid var(--c-border); }
 .ta-trace__summary > div:first-child { padding-left: 0; }
 .ta-trace__summary > div:last-child { border-right: 0; }

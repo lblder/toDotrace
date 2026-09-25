@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { UseMutationResult } from '@tanstack/react-query'
 import { api } from '../lib/api-client'
 import type { CheckinResult, DayRow, TodayCheckin } from '../lib/api-client'
+import { TIMER_QUERY_KEY } from './use-timer'
 import { queryKeys } from './query-keys'
 
 export interface CheckinApi {
@@ -60,6 +61,7 @@ export function useCheckin(): CheckinApi {
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.checkinToday })
     void queryClient.invalidateQueries({ queryKey: queryKeys.trace })
+    void queryClient.invalidateQueries({ queryKey: TIMER_QUERY_KEY })
   }
 
   const arrive = useMutation<CheckinResult, Error, void>({

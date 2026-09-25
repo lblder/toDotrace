@@ -1,4 +1,5 @@
 import { compareDayKey, toDayKey, type DayKey } from '@shared/time'
+import { stopActiveTimer } from '../timer/service.js'
 import { currentStreak } from '@shared/checkin'
 import type { Db } from '../db/connection.js'
 import { appendEvents } from '../events/append.js'
@@ -132,6 +133,7 @@ export function leave(db: Db, accountId: string, now: Date): CheckinResult {
     // ADR-012 §3 的失败路径表与 §5 都规定这个码是 409 conflict/not-arrived。
     throw notArrived()
   }
+  stopActiveTimer(db, accountId, now)
   if (latest.leftAt !== null) {
     // 该行已闭合：这是重复点击或网络重试，**不写第二条离开事件**，如实返回既有状态
     // （§3 的幂等语义）。注意 §5 的分流表确实就是「看最近那条」，不去找更早的未闭合行——
@@ -253,6 +255,7 @@ export function setAway(db: Db, accountId: string, now: Date, away: boolean): Ch
   const latest = findLatestArrival(db, accountId)
   if (latest === null) throw notArrived()
   if (latest.leftAt !== null) throw conflict('conflict/status-transition', '本次打卡已结束。')
+  if (away) stopActiveTimer(db, accountId, now)
   const isAway = latest.breaks?.at(-1)?.endedAt === null
   if (isAway === away) return { day: toDayRow(latest), created: false }
   const settings = loadAccountSettings(db, accountId)
