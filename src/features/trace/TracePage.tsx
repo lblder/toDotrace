@@ -122,27 +122,6 @@ function DailyDetail({ day }: { day: TraceDay | null }) {
   </section>
 }
 
-function linePath(values: readonly number[], max: number): string {
-  if (values.length === 0) return ''
-  return values.map((value, index) => `${index === 0 ? 'M' : 'L'} ${values.length === 1 ? 350 : 24 + index * 652 / (values.length - 1)} ${164 - value / max * 136}`).join(' ')
-}
-
-function Trend({ data }: { data: TracePayload }) {
-  const values = data.trend
-  const maximum = Math.max(1, ...values.map((row) => Math.max(row.created, row.completed)))
-  return <section className="ta-trace__panel" aria-labelledby="trace-trend">
-    <div className="ta-trace__panelHead"><div><h2 id="trace-trend">计划与完成</h2></div><span className="ta-trace__legend"><i className="ta-trace__legendNew" />新增 <i className="ta-trace__legendDone" />完成</span></div>
-    {values.length === 0 ? <p className="ta-trace__subtle">暂无记录。</p> : <>
-      <svg className="ta-trace__trendChart" viewBox="0 0 700 190" role="img" aria-label={`${values.length} 个时间点的新增和完成趋势`} preserveAspectRatio="none">
-        <path className="ta-trace__guide" d="M 24 28 H 676 M 24 96 H 676 M 24 164 H 676" />
-        <path className="ta-trace__lineNew" d={linePath(values.map((row) => row.created), maximum)} />
-        <path className="ta-trace__lineDone" d={linePath(values.map((row) => row.completed), maximum)} />
-      </svg>
-      <div className="ta-trace__chartFoot ta-mono"><span>{values[0]?.label}</span><span>峰值 {maximum}</span><span>{values.at(-1)?.label}</span></div>
-    </>}
-  </section>
-}
-
 function RatioRow({ label, value }: { label: string; value: TraceRatio }) {
   return <div className="ta-trace__ratioRow">
     <div><span>{label}</span><span className="ta-mono">{value.numerator} / {value.denominator}</span></div>
@@ -179,15 +158,14 @@ function focusDuration(seconds: number): string {
 function SupportingCharts({ data }: { data: TracePayload }) {
   const weekdayNames = ['一', '二', '三', '四', '五', '六', '日']
   const maxWeekday = Math.max(1, ...data.weekdays)
-  const arrivalMax = Math.max(1, ...data.arrivals)
+  const arrivalDays = data.days.filter(day => day.arrival !== null).reverse()
   return <div className="ta-trace__supportGrid">
     <Suspense fallback={<p className="ta-trace__subtle">正在加载时长图表…</p>}><TimeCharts data={data} /></Suspense>
     <section className="ta-trace__panel" aria-labelledby="trace-rhythm"><div className="ta-trace__panelHead"><div><h2 id="trace-rhythm">星期节律</h2></div><small>完成次数</small></div>
       <div className="ta-trace__weekdayBars">{data.weekdays.map((count, index) => <div key={index}><div className="ta-trace__weekdayTrack"><span style={{ height: `${count === 0 ? 0 : Math.max(8, count / maxWeekday * 100)}%` }} /></div><span className="ta-mono">{weekdayNames[index]}</span><small>{count}</small></div>)}</div>
     </section>
-    <section className="ta-trace__panel" aria-labelledby="trace-arrival"><div className="ta-trace__panelHead"><div><h2 id="trace-arrival">到达时刻</h2></div><small>本地时间</small></div>
-      {data.totals.checkinDays === 0 ? <p className="ta-trace__subtle">暂无到达记录。</p> : <div className="ta-trace__arrivalBars" role="img" aria-label="24 小时到达时刻分布">{data.arrivals.map((count, hour) => <span key={hour} style={{ height: `${count === 0 ? 2 : Math.max(9, count / arrivalMax * 100)}%` }} title={`${hour}:00–${hour + 1}:00：${count} 天`} />)}</div>}
-      <div className="ta-trace__chartFoot ta-mono"><span>00:00</span><span>12:00</span><span>24:00</span></div>
+    <section className="ta-trace__panel" aria-labelledby="trace-arrival"><div className="ta-trace__panelHead"><h2 id="trace-arrival">到达时刻</h2><small>记录时当地时间</small></div>
+      {arrivalDays.length === 0 ? <p className="ta-trace__subtle">暂无到达记录。</p> : <div className="ta-trace__arrivalList"><table><thead><tr><th>归属日</th><th>到达日期与时间</th></tr></thead><tbody>{arrivalDays.map(day => <tr key={day.dayKey}><td>{day.dayKey}</td><td><time dateTime={day.arrival!}>{day.arrival!.slice(0, 10)} <strong>{clock(day.arrival!)}</strong></time></td></tr>)}</tbody></table></div>}
     </section>
     <section className="ta-trace__panel" aria-labelledby="trace-types"><div className="ta-trace__panelHead"><div><h2 id="trace-types">计划类型</h2></div><small>本期新建</small></div>
       <div className="ta-trace__types">{([['日计划', data.planTypes.day], ['周计划', data.planTypes.week], ['重复', data.planTypes.recurring], ['无日期', data.planTypes.undated]] as const).map(([label, count]) => <div key={label}><span>{label}</span><strong className="ta-readout">{count}</strong></div>)}</div>
@@ -229,7 +207,7 @@ export function TracePage() {
       </section>
       <div className="ta-trace__summary" aria-label="本期概览"><div><small>新建计划</small><strong className="ta-readout">{data.totals.created}</strong></div><div><small>完成次数</small><strong className="ta-readout">{data.totals.completed}</strong></div><div><small>到达天数</small><strong className="ta-readout">{data.totals.checkinDays}</strong></div><div><small>在场时长</small><strong className="ta-readout">{minutes(data.totals.totalDurationMinutes)}</strong></div><div><small>专注时长</small><strong className="ta-readout">{focusDuration(data.totals.totalFocusSeconds)}</strong></div></div>
       {data.project !== null && <p className="ta-trace__projectNote">当前统计：项目周期内的全账号活动。项目任务：{data.project.ownedCompleted} / {data.project.ownedTotal} 条已完成。</p>}
-      <div className="ta-trace__mainGrid"><Trend data={data} /><Evaluation data={data} /></div>
+      <Evaluation data={data} />
       <SupportingCharts data={data} />
     </>}
   </div>

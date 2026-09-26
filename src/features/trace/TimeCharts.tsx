@@ -73,13 +73,14 @@ function Attendance({ data }: { data: TracePayload }) {
     tooltip: { trigger: 'axis', renderMode: 'richText', confine: true, axisPointer: { type: 'shadow' }, formatter: (params: unknown) => {
       const index = (params as { dataIndex: number }[])[0]?.dataIndex
       const day = index === undefined ? undefined : days[index]
-      return day ? `${day.dayKey}\n在场：${label(day)}\n目标：${timeText(data.goalMinutes * 60)}` : ''
+      return day ? `${day.dayKey}\n在场：${label(day)}${day.presenceFocusSeconds === null ? '' : `\n专注：${timeText(day.presenceFocusSeconds)}\n其他：${timeText(day.presenceOtherSeconds ?? 0)}`}\n目标：${timeText(data.goalMinutes * 60)}` : ''
     } },
     xAxis: { type: 'category', data: days.map(day => day.dayKey), axisTick: { show: false }, axisLine: { lineStyle: { color: p.line } }, axisLabel: { color: p.muted, formatter: dateText, hideOverlap: true } },
     yAxis: { type: 'value', min: 0, minInterval: 1, name: '小时', nameTextStyle: { color: p.muted }, axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.line, type: 'dashed' } }, max: Math.max(2, Math.ceil(Math.max(peak, data.goalMinutes) * 1.15 / 120) * 2) },
     dataZoom: days.length > 31 ? [{ type: 'slider', bottom: 4, height: 20, startValue: Math.max(0, days.length - 31), endValue: days.length - 1, textStyle: { color: p.muted }, borderColor: p.line }] : [],
-    series: [{ type: 'bar', name: '在场时长', barMaxWidth: 24, data: days.map(day => day.durationMinutes === null ? null : day.durationMinutes / 60),
-      itemStyle: { color: p.success, borderRadius: [3, 3, 0, 0] },
+    series: [{ type: 'bar', name: '专注时长', stack: 'presence', barMaxWidth: 24, data: days.map(day => day.presenceFocusSeconds === null ? null : day.presenceFocusSeconds / 3600), itemStyle: { color: p.success } },
+    { type: 'bar', name: '其他时长', stack: 'presence', barMaxWidth: 24, data: days.map(day => day.presenceOtherSeconds === null ? null : day.presenceOtherSeconds / 3600),
+      itemStyle: { color: p.colors[2], borderRadius: [3, 3, 0, 0] },
       label: { show: days.length <= 31, position: 'top', color: p.ink, fontSize: 10, formatter: (params: { dataIndex: number }) => { const minutes = days[params.dataIndex]?.durationMinutes; return minutes == null ? '' : `${Math.floor(minutes / 60)}h${minutes % 60 ? `${minutes % 60}m` : ''}` } },
       emphasis: { itemStyle: { color: p.primary } },
       markLine: { silent: true, symbol: 'none', lineStyle: { color: p.primary, type: 'dashed' }, label: { formatter: '目标', position: 'insideEndTop', color: p.primary }, data: [{ yAxis: data.goalMinutes / 60 }] },
@@ -89,16 +90,21 @@ function Attendance({ data }: { data: TracePayload }) {
   return <section className="ta-trace__panel ta-trace__timePanel" aria-labelledby="trace-duration">
     <div className="ta-trace__panelHead"><h2 id="trace-duration">在场时长</h2><small>每日目标 {timeText(data.goalMinutes * 60)}</small></div>
     <div className="ta-trace__timeReadouts"><div><small>本期累计</small><strong>{timeText(data.totals.totalDurationMinutes * 60)}</strong></div><div><small>日均 · {valid.length} 个有效日</small><strong>{timeText(valid.length ? Math.round(data.totals.totalDurationMinutes / valid.length) * 60 : 0)}</strong></div></div>
-    <Plot label="每日在场时长，横轴日期，纵轴小时，虚线为每日目标" build={build} onSelect={select} />
+    <div className="ta-trace__presenceLegend"><span><i />专注时长</span><span><i />其他时长</span></div>
+    <Plot label="每日在场时长，由专注时长和其他时长堆叠组成，横轴日期，纵轴小时，虚线为每日目标" build={build} onSelect={select} />
     <div className="ta-trace__dayReadout"><select className="ta-input" aria-label="查看日期的在场时长" value={selected?.dayKey ?? ''} onChange={event => choose(event.target.value)}>{days.map(day => <option key={day.dayKey} value={day.dayKey}>{day.dayKey}</option>)}</select><strong aria-live="polite">{label(selected)}</strong></div>
-    <p className="ta-trace__footnote">到达至离开，扣除暂离时间。{data.totals.durationNeedsReviewDays > 0 ? ` ${data.totals.durationNeedsReviewDays} 天待核对，未计入。` : ''}</p>
+    <div className="ta-trace__presenceDetail" aria-live="polite">{selected?.presenceFocusSeconds != null && <>专注 {timeText(selected.presenceFocusSeconds)}<span>其他 {timeText(selected.presenceOtherSeconds ?? 0)}</span></>}</div>
+    <p className="ta-trace__footnote">扣除暂离；专注仅计在场期间。{data.totals.durationNeedsReviewDays > 0 ? ` ${data.totals.durationNeedsReviewDays} 天待核对，未计入。` : ''}</p>
   </section>
 }
 
 function FocusProjects({ data }: { data: TracePayload }) {
   const [active, setActive] = useState(-1)
-  const groups = data.focusProjects
-  const total = data.totals.totalFocusSeconds
+  const [scope, setScope] = useState<'today' | 'week' | 'all'>('today')
+  const window = data.focusWindows[scope]
+  const groups = window.projects
+  const total = window.seconds
+  const scopes = { today: '今日专注', week: '近一周', all: '累计专注' } as const
   const percent = (seconds: number) => total > 0 ? `${(seconds / total * 100).toFixed(1)}%` : '0%'
   useEffect(() => { setActive(-1) }, [groups])
   const build = useCallback((p: Palette): EChartsOption => ({
@@ -116,8 +122,10 @@ function FocusProjects({ data }: { data: TracePayload }) {
   const selected = active >= 0 ? groups[active] : undefined
   return <section className="ta-trace__panel ta-trace__timePanel" aria-labelledby="trace-focus">
     <div className="ta-trace__panelHead"><h2 id="trace-focus">专注时长</h2><small>{data.focusRunning ? '正在计时 · 每 15 秒更新' : '按项目分布'}</small></div>
-    {groups.length === 0 ? <div className="ta-trace__chartEmpty"><strong>0 秒</strong><p>开始一次番茄计时后，这里会显示项目占比。</p></div> : <div className="ta-trace__focusLayout">
-      <div className="ta-trace__donutWrap"><Plot label="各项目专注时长占比环形图" build={build} onSelect={setActive} selected={active} className="ta-trace__donut" /><div className="ta-trace__donutCenter"><small>{selected ? percent(selected.seconds) : '累计专注'}</small><strong>{timeText(selected?.seconds ?? total)}</strong></div></div>
+    <div className="ta-trace__modeSwitch ta-trace__focusScopes" role="group" aria-label="专注统计范围">{(Object.keys(scopes) as (keyof typeof scopes)[]).map(key => <button key={key} type="button" className={scope === key ? 'is-active' : ''} aria-pressed={scope === key} onClick={() => setScope(key)}>{scopes[key]}</button>)}</div>
+    <small className="ta-trace__focusRange">{window.from} — {window.to}{scope === 'week' ? ' · 含今天的最近 7 天' : ''}</small>
+    {groups.length === 0 ? <div className="ta-trace__chartEmpty"><strong>0 秒</strong><p>此范围内暂无专注记录。</p></div> : <div className="ta-trace__focusLayout">
+      <div className="ta-trace__donutWrap"><Plot label="各项目专注时长占比环形图" build={build} onSelect={setActive} selected={active} className="ta-trace__donut" /><div className="ta-trace__donutCenter"><small>{selected ? percent(selected.seconds) : scopes[scope]}</small><strong>{timeText(selected?.seconds ?? total)}</strong></div></div>
       <ul className="ta-trace__projectTimes" aria-label="项目专注时长明细">{groups.map((group, index) => <li key={group.projectId ?? 'unassigned'}><button type="button" aria-pressed={active === index} onClick={() => setActive(index)} onFocus={() => setActive(index)}><i style={{ background: `var(${colorVars[index % colorVars.length]})` }} /><span className="ta-trace__projectTimeName" title={group.name}>{group.name}</span><strong>{timeText(group.seconds)}</strong><small>{percent(group.seconds)}</small></button></li>)}</ul>
     </div>}
     <p className="ta-trace__footnote">按开始计时时所属项目统计。暂停时间不计入。</p>

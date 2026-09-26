@@ -248,3 +248,41 @@ describe('专注项目分布', () => {
     expect(empty.focusProjects).toEqual([])
   })
 })
+
+
+describe('独立专注范围与在场分段', () => {
+  it('今日、含今天的七天和全部历史独立于页面统计范围，且账号隔离', () => {
+    const account = freshAccount()
+    const taskId = create(account, '2026-09-01')
+    for (const day of ['2026-09-17', '2026-09-18', '2026-09-24']) {
+      const start = emit(account, 'task/timer-started', day, { taskId, occurrenceKey: day }, '09:00')
+      emit(account, 'task/timer-stopped', day, { taskId, sessionId: start.id }, '10:00')
+    }
+    const result = getTrace(db, account, NOW, { period: 'week', goalMinutes: 360 })
+    expect(result.focusWindows.today.seconds).toBe(3600)
+    expect(result.focusWindows.week).toMatchObject({ from: '2026-09-18', to: '2026-09-24', seconds: 7200 })
+    expect(result.focusWindows.all.seconds).toBe(10800)
+    expect(result.focusWindows).toEqual(getTrace(db, account, NOW, { period: 'month', goalMinutes: 360 }).focusWindows)
+    for (const window of Object.values(result.focusWindows)) expect(window.projects.reduce((sum, row) => sum + row.seconds, 0)).toBe(window.seconds)
+    expect(trace(freshAccount()).focusWindows.all.seconds).toBe(0)
+  })
+
+  it('只计算与在场重合的专注时间，排除到达前、暂离和离开后', () => {
+    const account = freshAccount()
+    const taskId = create(account, '2026-09-22')
+    const start = (hour: string) => emit(account, 'task/timer-started', '2026-09-22', { taskId, occurrenceKey: '2026-09-22' }, hour)
+    start('07:00')
+    emit(account, 'checkin/arrived', '2026-09-22', {}, '08:00')
+    emit(account, 'checkin/away', '2026-09-22', {}, '09:00')
+    const outside = start('09:10')
+    emit(account, 'task/timer-stopped', '2026-09-22', { taskId, sessionId: outside.id }, '09:40')
+    emit(account, 'checkin/returned', '2026-09-22', {}, '10:00')
+    start('10:30')
+    emit(account, 'checkin/left', '2026-09-22', {}, '11:00')
+    const after = start('12:00')
+    emit(account, 'task/timer-stopped', '2026-09-22', { taskId, sessionId: after.id }, '13:00')
+    const result = trace(account)
+    expect(result.days.find(day => day.dayKey === '2026-09-22')).toMatchObject({ durationMinutes: 120, presenceFocusSeconds: 5400, presenceOtherSeconds: 1800, focusSeconds: 14400 })
+    expect(result.days.find(day => day.dayKey === '2026-09-23')).toMatchObject({ presenceFocusSeconds: null, presenceOtherSeconds: null })
+  })
+})

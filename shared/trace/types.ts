@@ -20,6 +20,8 @@ export interface TraceDay {
   durationMinutes: number | null
   durationNeedsReview: boolean
   focusSeconds: number
+  presenceFocusSeconds: number | null
+  presenceOtherSeconds: number | null
 }
 
 export interface TraceTrendPoint {
@@ -56,7 +58,15 @@ export interface TraceProjectSummary {
   ownedCompleted: number
 }
 
+export interface FocusSummary {
+  from: DayKey
+  to: DayKey
+  seconds: number
+  projects: { projectId: string | null; name: string; seconds: number }[]
+}
+
 export interface TracePayload {
+  focusWindows: Record<'today' | 'week' | 'all', FocusSummary>
   today: DayKey
   focusRunning: boolean
   focusProjects: { projectId: string | null; name: string; seconds: number }[]

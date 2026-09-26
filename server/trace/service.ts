@@ -87,7 +87,7 @@ function deadlinesAtCompletion(events: Sources['events']): Map<string, DayKey | 
   return deadlines
 }
 
-function fillDays(keys: readonly DayKey[], today: DayKey, sources: Sources, completedByDay: Map<DayKey, TraceTaskRecord[]>, createdByDay: Map<DayKey, number>, focusByDay: Map<DayKey, number>): TraceDay[] {
+function fillDays(keys: readonly DayKey[], today: DayKey, sources: Sources, completedByDay: Map<DayKey, TraceTaskRecord[]>, createdByDay: Map<DayKey, number>, focusByDay: Map<DayKey, number>, presenceFocus: Map<DayKey, number>): TraceDay[] {
   const arrivalByDay = new Map(sources.projection.days.map((row) => [row.dayKey, row]))
   return keys.map((dayKey) => {
     const arrival = arrivalByDay.get(dayKey)
@@ -104,6 +104,8 @@ function fillDays(keys: readonly DayKey[], today: DayKey, sources: Sources, comp
       left: future ? null : arrival?.leftAt ?? null,
       durationMinutes: future ? null : duration.minutes,
       durationNeedsReview: future ? false : duration.needsReview,
+      presenceFocusSeconds: future || duration.minutes === null ? null : Math.min(duration.minutes * 60, presenceFocus.get(dayKey) ?? 0),
+      presenceOtherSeconds: future || duration.minutes === null ? null : duration.minutes * 60 - Math.min(duration.minutes * 60, presenceFocus.get(dayKey) ?? 0),
       focusSeconds: future ? 0 : Math.floor((focusByDay.get(dayKey) ?? 0) / 1000),
     }
   })
@@ -261,27 +263,65 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
     }
   }
 
+  // 在场柱状图只计算与到达—离开（扣除暂离）相交的专注片段。
+  // 跨日到访沿用到达的归属日，与在场时长统计口径一致。
+  const presenceFocus = new Map<DayKey, number>()
+  for (const visit of sources.projection.days) {
+    if (durationOf(visit.arrivedAt, visit.leftAt, visit.breaks).minutes === null || visit.leftAt === null) continue
+    const arrived = Date.parse(visit.arrivedAt)
+    const left = Date.parse(visit.leftAt)
+    const intersections = sessions.map(session => [Math.max(arrived, Date.parse(session.startedAt)), Math.min(left, now.getTime(), Date.parse(session.stoppedAt))] as const)
+      .filter(([start, end]) => end > start).sort((a, b) => a[0] - b[0])
+    const merged: [number, number][] = []
+    for (const [start, end] of intersections) {
+      const last = merged.at(-1)
+      if (last && start <= last[1]) last[1] = Math.max(last[1], end)
+      else merged.push([start, end])
+    }
+    let millis = 0
+    for (const [start, end] of merged) {
+      let value = end - start
+      for (const pause of visit.breaks ?? []) {
+        value -= Math.max(0, Math.min(end, Date.parse(pause.endedAt ?? visit.leftAt)) - Math.max(start, Date.parse(pause.startedAt)))
+      }
+      millis += Math.max(0, value)
+    }
+    presenceFocus.set(visit.dayKey, Math.floor(millis / 1000))
+  }
+
   const heatmapEnd = weekEnd(today)
   const heatmapStart = addDays(heatmapEnd, -370)
-  const heatmap = fillDays(dayList(heatmapStart, heatmapEnd), today, sources, completedByDay, createdByDay, focusByDay)
+  const heatmap = fillDays(dayList(heatmapStart, heatmapEnd), today, sources, completedByDay, createdByDay, focusByDay, presenceFocus)
   const rangeEnd = range.to < today ? range.to : today
-  const days = fillDays(dayList(range.from, rangeEnd), today, sources, completedByDay, createdByDay, focusByDay)
-  const projectSeconds = new Map<string | null, number>()
-  for (const day of days) {
-    const groups = [...(projectMillisByDay.get(day.dayKey) ?? [])].map(([id, ms]) => ({ id, seconds: Math.floor(ms / 1000), remainder: ms % 1000 }))
-    // 以日累计秒数为准分配余数，项目之和始终等于总专注时长。
-    let remaining = day.focusSeconds - groups.reduce((sum, group) => sum + group.seconds, 0)
-    groups.sort((a, b) => b.remainder - a.remainder || String(a.id).localeCompare(String(b.id)))
-    for (const group of groups) {
-      const seconds = group.seconds + (remaining-- > 0 ? 1 : 0)
-      projectSeconds.set(group.id, (projectSeconds.get(group.id) ?? 0) + seconds)
+  const days = fillDays(dayList(range.from, rangeEnd), today, sources, completedByDay, createdByDay, focusByDay, presenceFocus)
+  const summarizeFocus = (from: DayKey, to: DayKey) => {
+    const projectSeconds = new Map<string | null, number>()
+    let seconds = 0
+    for (const [key, millis] of projectMillisByDay) {
+      if (key < from || key > to) continue
+      const groups = [...millis].map(([id, ms]) => ({ id, seconds: Math.floor(ms / 1000), remainder: ms % 1000 }))
+      const daySeconds = Math.floor((focusByDay.get(key) ?? 0) / 1000)
+      seconds += daySeconds
+      let remaining = daySeconds - groups.reduce((sum, group) => sum + group.seconds, 0)
+      groups.sort((a, b) => b.remainder - a.remainder || String(a.id).localeCompare(String(b.id)))
+      for (const group of groups) {
+        projectSeconds.set(group.id, (projectSeconds.get(group.id) ?? 0) + group.seconds + (remaining-- > 0 ? 1 : 0))
+      }
     }
+    const projectsById = new Map(sources.projection.projects.map(project => [project.id, project]))
+    const projects = [...projectSeconds].filter(([, seconds]) => seconds > 0).map(([projectId, seconds]) => {
+      const project = projectId === null ? undefined : projectsById.get(projectId)
+      return { projectId, seconds, name: projectId === null ? '未归属项目' : project ? `${project.name}${project.deletedAt === null ? '' : '（已删除）'}` : '已移除项目' }
+    }).sort((a, b) => b.seconds - a.seconds || String(a.projectId).localeCompare(String(b.projectId)))
+    return { from, to, seconds, projects }
   }
-  const projects = new Map(sources.projection.projects.map(project => [project.id, project]))
-  const focusProjects = [...projectSeconds].filter(([, seconds]) => seconds > 0).map(([projectId, seconds]) => {
-    const project = projectId === null ? undefined : projects.get(projectId)
-    return { projectId, seconds, name: projectId === null ? '未归属项目' : project ? `${project.name}${project.deletedAt === null ? '' : '（已删除）'}` : '已移除项目' }
-  }).sort((a, b) => b.seconds - a.seconds || String(a.projectId).localeCompare(String(b.projectId)))
+  const firstFocus = [...focusByDay.keys()].reduce((first, key) => key < first ? key : first, today)
+  const focusWindows = {
+    today: summarizeFocus(today, today),
+    week: summarizeFocus(addDays(today, -6), today),
+    all: summarizeFocus(firstFocus, today),
+  }
+  const focusProjects = summarizeFocus(range.from, rangeEnd).projects
   const trend = trendOf(days, query.period)
   const score = scoreOf({ days, range, today, sources, createdTasks, goalMinutes: query.goalMinutes })
   const durationDays = days.filter((day) => day.durationMinutes !== null)
@@ -303,7 +343,7 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
   const owned = selected === null ? [] : liveTasks.filter((task) => task.projectId === selected.id)
   const occurrenceEvents = occurrenceEventsOf(sources.events)
   return {
-    today, focusProjects, focusRunning: timer.active !== null, period: query.period, range, goalMinutes: query.goalMinutes, heatmap, days,
+    today, focusWindows, focusProjects, focusRunning: timer.active !== null, period: query.period, range, goalMinutes: query.goalMinutes, heatmap, days,
     trend: trend.trend, trendUnit: trend.trendUnit, score,
     totals: {
       created: days.reduce((sum, day) => sum + day.created, 0),
