@@ -20,8 +20,8 @@ export function timeText(seconds: number): string {
 }
 const dateText = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`
 
-function Plot({ label, build, onSelect, selected, className = '' }: {
-  label: string; build: (palette: Palette) => EChartsOption; onSelect?: (index: number) => void; selected?: number; className?: string
+function Plot({ label, build, onSelect, selected, tooltipIndex, className = '' }: {
+  label: string; build: (palette: Palette) => EChartsOption; onSelect?: (index: number) => void; selected?: number; tooltipIndex?: number; className?: string
 }) {
   const element = useRef<HTMLDivElement>(null)
   const instance = useRef<Chart | null>(null)
@@ -57,6 +57,9 @@ function Plot({ label, build, onSelect, selected, className = '' }: {
     chart.dispatchAction({ type: 'downplay', seriesIndex: 0 })
     if (selected >= 0) chart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: selected })
   }, [selected, build, resolved])
+  useEffect(() => {
+    if (tooltipIndex !== undefined && tooltipIndex >= 0) instance.current?.dispatchAction({ type: 'showTip', seriesIndex: 0, dataIndex: tooltipIndex })
+  }, [tooltipIndex, build])
   return <div className={`ta-trace__echart ${className}`} ref={element} role="img" aria-label={label} />
 }
 
@@ -88,13 +91,11 @@ function Attendance({ data }: { data: TracePayload }) {
   }), [days, peak, data.goalMinutes])
   const select = useCallback((index: number) => { if (days[index]) choose(days[index].dayKey) }, [days])
   return <section className="ta-trace__panel ta-trace__timePanel" aria-labelledby="trace-duration">
-    <div className="ta-trace__panelHead"><h2 id="trace-duration">在场时长</h2><small>每日目标 {timeText(data.goalMinutes * 60)}</small></div>
+    <div className="ta-trace__panelHead"><h2 id="trace-duration">在场时长</h2></div>
     <div className="ta-trace__timeReadouts"><div><small>本期累计</small><strong>{timeText(data.totals.totalDurationMinutes * 60)}</strong></div><div><small>日均 · {valid.length} 个有效日</small><strong>{timeText(valid.length ? Math.round(data.totals.totalDurationMinutes / valid.length) * 60 : 0)}</strong></div></div>
     <div className="ta-trace__presenceLegend"><span><i />专注时长</span><span><i />其他时长</span></div>
-    <Plot label="每日在场时长，由专注时长和其他时长堆叠组成，横轴日期，纵轴小时，虚线为每日目标" build={build} onSelect={select} />
-    <div className="ta-trace__dayReadout"><select className="ta-input" aria-label="查看日期的在场时长" value={selected?.dayKey ?? ''} onChange={event => choose(event.target.value)}>{days.map(day => <option key={day.dayKey} value={day.dayKey}>{day.dayKey}</option>)}</select><strong aria-live="polite">{label(selected)}</strong></div>
-    <div className="ta-trace__presenceDetail" aria-live="polite">{selected?.presenceFocusSeconds != null && <>专注 {timeText(selected.presenceFocusSeconds)}<span>其他 {timeText(selected.presenceOtherSeconds ?? 0)}</span></>}</div>
-    <p className="ta-trace__footnote">扣除暂离；专注仅计在场期间。{data.totals.durationNeedsReviewDays > 0 ? ` ${data.totals.durationNeedsReviewDays} 天待核对，未计入。` : ''}</p>
+    <Plot label="每日在场时长，由专注时长和其他时长堆叠组成，横轴日期，纵轴小时，虚线为每日目标" build={build} onSelect={select} tooltipIndex={chosen === null ? undefined : days.findIndex(day => day.dayKey === chosen)} />
+    <div className="ta-trace__dayReadout"><select className="ta-input" aria-label="查看日期的在场时长" value={selected?.dayKey ?? ''} onChange={event => choose(event.target.value)}>{days.map(day => <option key={day.dayKey} value={day.dayKey}>{day.dayKey}</option>)}</select></div>
   </section>
 }
 
@@ -104,7 +105,7 @@ function FocusProjects({ data }: { data: TracePayload }) {
   const window = data.focusWindows[scope]
   const groups = window.projects
   const total = window.seconds
-  const scopes = { today: '今日专注', week: '近一周', all: '累计专注' } as const
+  const scopes = { today: '今日专注', week: '最近一周', all: '累计专注' } as const
   const percent = (seconds: number) => total > 0 ? `${(seconds / total * 100).toFixed(1)}%` : '0%'
   useEffect(() => { setActive(-1) }, [groups])
   const build = useCallback((p: Palette): EChartsOption => ({
@@ -121,14 +122,13 @@ function FocusProjects({ data }: { data: TracePayload }) {
   }), [groups, total])
   const selected = active >= 0 ? groups[active] : undefined
   return <section className="ta-trace__panel ta-trace__timePanel" aria-labelledby="trace-focus">
-    <div className="ta-trace__panelHead"><h2 id="trace-focus">专注时长</h2><small>{data.focusRunning ? '正在计时 · 每 15 秒更新' : '按项目分布'}</small></div>
-    <div className="ta-trace__modeSwitch ta-trace__focusScopes" role="group" aria-label="专注统计范围">{(Object.keys(scopes) as (keyof typeof scopes)[]).map(key => <button key={key} type="button" className={scope === key ? 'is-active' : ''} aria-pressed={scope === key} onClick={() => setScope(key)}>{scopes[key]}</button>)}</div>
+    <div className="ta-trace__panelHead ta-trace__focusHead"><h2 id="trace-focus">专注时长</h2>
+    <div className="ta-trace__modeSwitch ta-trace__focusScopes" role="group" aria-label="专注统计范围">{(Object.keys(scopes) as (keyof typeof scopes)[]).map(key => <button key={key} type="button" className={scope === key ? 'is-active' : ''} aria-pressed={scope === key} onClick={() => setScope(key)}>{scopes[key]}</button>)}</div></div>
     <small className="ta-trace__focusRange">{window.from} — {window.to}{scope === 'week' ? ' · 含今天的最近 7 天' : ''}</small>
     {groups.length === 0 ? <div className="ta-trace__chartEmpty"><strong>0 秒</strong><p>此范围内暂无专注记录。</p></div> : <div className="ta-trace__focusLayout">
       <div className="ta-trace__donutWrap"><Plot label="各项目专注时长占比环形图" build={build} onSelect={setActive} selected={active} className="ta-trace__donut" /><div className="ta-trace__donutCenter"><small>{selected ? percent(selected.seconds) : scopes[scope]}</small><strong>{timeText(selected?.seconds ?? total)}</strong></div></div>
       <ul className="ta-trace__projectTimes" aria-label="项目专注时长明细">{groups.map((group, index) => <li key={group.projectId ?? 'unassigned'}><button type="button" aria-pressed={active === index} onClick={() => setActive(index)} onFocus={() => setActive(index)}><i style={{ background: `var(${colorVars[index % colorVars.length]})` }} /><span className="ta-trace__projectTimeName" title={group.name}>{group.name}</span><strong>{timeText(group.seconds)}</strong><small>{percent(group.seconds)}</small></button></li>)}</ul>
     </div>}
-    <p className="ta-trace__footnote">按开始计时时所属项目统计。暂停时间不计入。</p>
   </section>
 }
 

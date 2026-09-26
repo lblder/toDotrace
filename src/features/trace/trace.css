@@ -125,7 +125,6 @@
 .ta-trace__echart { width: 100%; height: 245px; min-width: 0; overflow: hidden; }
 .ta-trace__dayReadout { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); border-top: 1px solid var(--c-border); padding-top: var(--space-3); font-size: var(--fs-sm); }
 .ta-trace__dayReadout select { width: auto; max-width: 55%; min-height: 36px; }
-.ta-trace__dayReadout strong { font-weight: 500; font-variant-numeric: tabular-nums; }
 .ta-trace__focusLayout { display: grid; grid-template-columns: minmax(130px, .9fr) minmax(0, 1.1fr); gap: var(--space-3); align-items: center; flex: 1; }
 .ta-trace__donutWrap { position: relative; min-width: 0; }
 .ta-trace__donut { height: 220px; }
@@ -153,7 +152,6 @@
 .ta-trace__presenceLegend span { display: flex; align-items: center; gap: 6px; }
 .ta-trace__presenceLegend i { width: 9px; height: 9px; border-radius: 2px; background: var(--c-success); }
 .ta-trace__presenceLegend span:last-child i { background: var(--trace-project-3); }
-.ta-trace__presenceDetail { display: flex; flex-wrap: wrap; gap: 16px; min-height: 20px; margin-top: 10px; font-size: 12px; color: var(--c-ink-muted); }
 .ta-trace__focusScopes { align-self: flex-start; flex-wrap: wrap; }
 .ta-trace__focusRange { margin-top: 10px; color: var(--c-ink-muted); font-size: 11px; }
 .ta-trace__arrivalList { max-height: 260px; overflow: auto; }
@@ -164,3 +162,13 @@
 .ta-trace__evaluation .ta-trace__ratios { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
 @media (max-width: 800px) { .ta-trace__evaluation .ta-trace__ratios { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .ta-trace__evaluation .ta-trace__ratios { grid-template-columns: 1fr; } }
+
+.ta-trace__focusHead { align-items: center; flex-wrap: wrap; gap: 8px; }
+.ta-trace__focusHead h2 { white-space: nowrap; }
+.ta-trace__focusHead .ta-trace__focusScopes { margin-left: auto; align-self: center; }
+.ta-trace__focusScopes button { padding: 7px 9px; font-size: 12px; white-space: nowrap; }
+.ta-trace__calendarFoot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: var(--space-3); }
+.ta-trace__calendarFoot .ta-trace__heatLegend { margin-top: 0; margin-left: auto; }
+.ta-trace__calendarHint { color: var(--c-ink-muted); font-size: var(--fs-xs); }
+.ta-trace__evaluation details label { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.ta-trace__evaluation details select { width: auto; }

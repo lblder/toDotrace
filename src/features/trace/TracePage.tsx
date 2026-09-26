@@ -95,7 +95,7 @@ function Heatmap({ data, mode, selected, onSelect }: {
 }
 
 function DailyDetail({ day }: { day: TraceDay | null }) {
-  if (day === null) return <p className="ta-trace__subtle">点击日期查看记录。</p>
+  if (day === null) return null
   return <section className="ta-trace__daily" aria-live="polite" aria-label={`${dayLabel(day.dayKey)}的记录`}>
     <div className="ta-trace__dailyHead">
       <strong>{dayLabel(day.dayKey)}</strong>
@@ -130,7 +130,7 @@ function RatioRow({ label, value }: { label: string; value: TraceRatio }) {
   </div>
 }
 
-function Evaluation({ data }: { data: TracePayload }) {
+function Evaluation({ data, onGoalChange }: { data: TracePayload; onGoalChange: (minutes: number) => void }) {
   const { score } = data
   return <section className="ta-trace__panel ta-trace__evaluation" aria-labelledby="trace-score">
     <div className="ta-trace__panelHead"><div><h2 id="trace-score">本期评价</h2></div>{score.grade !== null && <span className="ta-trace__grade ta-readout" aria-label={`等级 ${score.grade}`}>{score.grade}</span>}</div>
@@ -141,6 +141,7 @@ function Evaluation({ data }: { data: TracePayload }) {
       <RatioRow label="投入度" value={score.effort} />
     </div>
     <details className="ta-trace__footnote"><summary>评分说明</summary>
+      <label>每日目标 <select className="ta-input" value={data.goalMinutes} onChange={(event) => onGoalChange(Number(event.target.value))}>{[180, 240, 360, 480].map((value) => <option key={value} value={value}>{value / 60} 小时</option>)}</select></label>
       <p>{score.explanation}</p>
       <p>{score.suggestion}</p>
       <p>一次完成率 {score.firstPass.percent === null ? '待积累' : `${score.firstPass.percent}%`} · {score.firstPass.numerator}/{score.firstPass.denominator} 条完成任务未顺延。</p>
@@ -194,20 +195,19 @@ export function TracePage() {
       {data !== undefined && <div className="ta-trace__heroDate"><small>今天</small><strong className="ta-readout">{dayLabel(data.today)}</strong></div>}
     </header>
     <nav className="ta-trace__periods" aria-label="统计区间">{PERIODS.map((item) => <button key={item.value} type="button" className={period === item.value ? 'is-active' : ''} aria-pressed={period === item.value} onClick={() => setPeriod(item.value)}>{item.label}</button>)}</nav>
-    <div className="ta-trace__filters">
+    {period === 'project' && <div className="ta-trace__filters">
       {period === 'project' && <label>项目 <select className="ta-input" value={effectiveProjectId ?? ''} onChange={(event) => setProjectId(event.target.value || null)}><option value="">选择项目</option>{projects.active.map((project) => <option value={project.projectId} key={project.projectId}>{project.name}</option>)}</select></label>}
-      <label>每日目标 <select className="ta-input" value={goalMinutes} onChange={(event) => setGoalMinutes(Number(event.target.value))}>{[180, 240, 360, 480].map((value) => <option key={value} value={value}>{value / 60} 小时</option>)}</select></label>
-    </div>
+    </div>}
     {!enabled ? <section className="ta-trace__empty"><h2>还没有项目周期</h2><p>创建项目后，可以按它的起止日期回看全账号的活动。</p></section> : trace.isPending ? <p className="ta-trace__loading">正在加载…</p> : trace.isError ? <section className="ta-trace__empty" role="alert"><h2>读取失败</h2><p>{errorMessage(trace.error)}</p><button type="button" className="ta-btn ta-btn--secondary" onClick={trace.refetch}>重试</button></section> : data !== undefined && <>
       <section className="ta-trace__hero" aria-labelledby="trace-calendar">
         <div className="ta-trace__heroTop"><div><h2 id="trace-calendar">完成日历</h2></div><div className="ta-trace__modeSwitch" role="group" aria-label="日历展示模式"><button type="button" className={mode === 'completed' ? 'is-active' : ''} aria-pressed={mode === 'completed'} onClick={() => setMode('completed')}>完成任务</button><button type="button" className={mode === 'arrival' ? 'is-active' : ''} aria-pressed={mode === 'arrival'} onClick={() => setMode('arrival')}>到达时刻</button></div></div>
         <Heatmap data={data.heatmap} mode={mode} selected={selected} onSelect={setSelected} />
-        <div className="ta-trace__heatLegend"><span>{mode === 'completed' ? '少' : '较晚'}</span>{[0, 1, 2, 3, 4, 5].map((level) => <i className={`ta-trace__heatCell--${level}`} key={level} />)}<span>{mode === 'completed' ? '多' : '较早'}</span>{mode === 'arrival' && <span className="ta-trace__restLegend"><i className="ta-trace__heatCell--rest" />休息日</span>}</div>
+        <div className="ta-trace__calendarFoot">{selectedDay === null && <span className="ta-trace__calendarHint">点击日期查看记录。</span>}<div className="ta-trace__heatLegend"><span>{mode === 'completed' ? '少' : '较晚'}</span>{[0, 1, 2, 3, 4, 5].map((level) => <i className={`ta-trace__heatCell--${level}`} key={level} />)}<span>{mode === 'completed' ? '多' : '较早'}</span>{mode === 'arrival' && <span className="ta-trace__restLegend"><i className="ta-trace__heatCell--rest" />休息日</span>}</div></div>
         <DailyDetail day={selectedDay} />
       </section>
       <div className="ta-trace__summary" aria-label="本期概览"><div><small>新建计划</small><strong className="ta-readout">{data.totals.created}</strong></div><div><small>完成次数</small><strong className="ta-readout">{data.totals.completed}</strong></div><div><small>到达天数</small><strong className="ta-readout">{data.totals.checkinDays}</strong></div><div><small>在场时长</small><strong className="ta-readout">{minutes(data.totals.totalDurationMinutes)}</strong></div><div><small>专注时长</small><strong className="ta-readout">{focusDuration(data.totals.totalFocusSeconds)}</strong></div></div>
       {data.project !== null && <p className="ta-trace__projectNote">当前统计：项目周期内的全账号活动。项目任务：{data.project.ownedCompleted} / {data.project.ownedTotal} 条已完成。</p>}
-      <Evaluation data={data} />
+      <Evaluation data={data} onGoalChange={setGoalMinutes} />
       <SupportingCharts data={data} />
     </>}
   </div>
