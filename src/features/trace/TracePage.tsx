@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import type { TraceDay, TracePayload, TracePeriod, TraceRatio } from '@shared/trace/types'
 import { useTrace } from '../../hooks/use-trace'
 import { useProjects } from '../../hooks/use-projects'
 import { errorMessage } from '../../lib/api-client/client'
 import './trace.css'
+
+const TimeCharts = lazy(() => import('./TimeCharts'))
 
 type HeatMode = 'completed' | 'arrival'
 
@@ -175,24 +177,11 @@ function focusDuration(seconds: number): string {
 }
 
 function SupportingCharts({ data }: { data: TracePayload }) {
-  const maxDuration = Math.max(data.goalMinutes, ...data.days.map((day) => day.durationMinutes ?? 0), 1)
-  const durationDays = data.days.filter((day) => day.durationMinutes !== null)
-  const focusDays = data.days.filter((day) => day.focusSeconds > 0)
-  const maxFocus = Math.max(1, ...focusDays.map(day => day.focusSeconds))
   const weekdayNames = ['一', '二', '三', '四', '五', '六', '日']
   const maxWeekday = Math.max(1, ...data.weekdays)
   const arrivalMax = Math.max(1, ...data.arrivals)
   return <div className="ta-trace__supportGrid">
-    <section className="ta-trace__panel" aria-labelledby="trace-duration"><div className="ta-trace__panelHead"><div><h2 id="trace-duration">在场时长</h2></div><small>停留目标 {minutes(data.goalMinutes)} / 日</small></div>
-      {durationDays.length === 0 ? <p className="ta-trace__subtle">暂无完整的到达与离开记录。</p> : <div className="ta-trace__bars" role="img" aria-label="每日有效停留时长柱状图">{durationDays.slice(-31).map((day) => <div className="ta-trace__barColumn" key={day.dayKey} title={`${dayLabel(day.dayKey)}：${minutes(day.durationMinutes!)}`}><span style={{ height: `${Math.max(4, day.durationMinutes! / maxDuration * 100)}%` }} /></div>)}</div>}
-      <p className="ta-trace__footnote">到达至离开，扣除暂离时间。</p>
-      {data.totals.durationNeedsReviewDays > 0 && <p className="ta-trace__footnote">{data.totals.durationNeedsReviewDays} 天的时长待核对，未计分。</p>}
-    </section>
-    <section className="ta-trace__panel" aria-labelledby="trace-focus">
-      <div className="ta-trace__panelHead"><h2 id="trace-focus">专注时长</h2><small>{data.focusRunning ? '正在计时 · 每 15 秒更新' : '番茄计时累计'}</small></div>
-      {focusDays.length === 0 ? <p className="ta-trace__subtle">暂无专注记录。</p> : <div className="ta-trace__bars" role="img" aria-label="每日专注时长柱状图">{focusDays.slice(-31).map(day => <div className="ta-trace__barColumn" key={day.dayKey} title={`${dayLabel(day.dayKey)}：${focusDuration(day.focusSeconds)}`}><span style={{ height: `${Math.max(4, day.focusSeconds / maxFocus * 100)}%` }} /></div>)}</div>}
-      <p className="ta-trace__footnote">累计实际计时片段，跨日按日界拆分，暂停期间不计入。</p>
-    </section>
+    <Suspense fallback={<p className="ta-trace__subtle">正在加载时长图表…</p>}><TimeCharts data={data} /></Suspense>
     <section className="ta-trace__panel" aria-labelledby="trace-rhythm"><div className="ta-trace__panelHead"><div><h2 id="trace-rhythm">星期节律</h2></div><small>完成次数</small></div>
       <div className="ta-trace__weekdayBars">{data.weekdays.map((count, index) => <div key={index}><div className="ta-trace__weekdayTrack"><span style={{ height: `${count === 0 ? 0 : Math.max(8, count / maxWeekday * 100)}%` }} /></div><span className="ta-mono">{weekdayNames[index]}</span><small>{count}</small></div>)}</div>
     </section>

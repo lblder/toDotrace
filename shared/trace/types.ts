@@ -59,6 +59,7 @@ export interface TraceProjectSummary {
 export interface TracePayload {
   today: DayKey
   focusRunning: boolean
+  focusProjects: { projectId: string | null; name: string; seconds: number }[]
   period: TracePeriod
   range: { from: DayKey; to: DayKey }
   goalMinutes: number

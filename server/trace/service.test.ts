@@ -210,3 +210,41 @@ describe('专注时间', () => {
     expect(trace(account).totals.totalFocusSeconds).toBe(1200)
   })
 })
+
+describe('专注项目分布', () => {
+  it('按开始时的项目分组；移动、删除项目不丢失历史，未归属时间纳入总和', () => {
+    const account = freshAccount()
+    const projectId = nextId()
+    emit(account, 'project/created', '2026-09-22', { projectId, name: '论文阅读', startsOn: '2026-09-01', endsOn: '2026-10-01' })
+    const taskId = create(account, '2026-09-22', { projectId })
+    const first = emit(account, 'task/timer-started', '2026-09-22', { taskId, occurrenceKey: '2026-09-22' }, '11:00')
+    emit(account, 'task/timer-stopped', '2026-09-22', { taskId, sessionId: first.id }, '11:30')
+    emit(account, 'task/updated', '2026-09-22', { taskId, title: '阅读', notes: '', importance: 'normal', tags: [], projectId: null, recurrence: null }, '12:00')
+    const second = emit(account, 'task/timer-started', '2026-09-23', { taskId, occurrenceKey: '2026-09-22' }, '09:00')
+    emit(account, 'task/timer-stopped', '2026-09-23', { taskId, sessionId: second.id }, '09:10')
+    emit(account, 'project/deleted', '2026-09-23', { projectId }, '11:00')
+    const result = trace(account)
+    expect(result.focusProjects).toEqual([
+      { projectId, name: '论文阅读（已删除）', seconds: 1800 },
+      { projectId: null, name: '未归属项目', seconds: 600 },
+    ])
+    expect(result.focusProjects.reduce((sum, row) => sum + row.seconds, 0)).toBe(result.totals.totalFocusSeconds)
+    expect(trace(freshAccount()).focusProjects).toEqual([])
+  })
+
+  it('跨日分摊和小数秒累计与总数一致，区间只计入选中日期', () => {
+    const account = freshAccount()
+    const projectId = nextId()
+    emit(account, 'project/created', '2026-09-22', { projectId, name: '实验', startsOn: '2026-09-01', endsOn: '2026-10-01' })
+    const ids = [create(account, '2026-09-22', { projectId }), create(account, '2026-09-22')]
+    ids.forEach((taskId, i) => {
+      const start = emit(account, 'task/timer-started', '2026-09-22', { taskId, occurrenceKey: '2026-09-22' }, '09:00', { occurredAt: `2026-09-22T09:00:0${i}.000+08:00` })
+      emit(account, 'task/timer-stopped', '2026-09-22', { taskId, sessionId: start.id }, '09:00', { occurredAt: `2026-09-22T09:00:0${i}.900+08:00` })
+    })
+    const result = trace(account)
+    expect(result.totals.totalFocusSeconds).toBe(1)
+    expect(result.focusProjects.reduce((sum, row) => sum + row.seconds, 0)).toBe(1)
+    const empty = getTrace(db, account, new Date('2026-10-01T12:00:00+08:00'), { period: 'month', goalMinutes: 360 })
+    expect(empty.focusProjects).toEqual([])
+  })
+})

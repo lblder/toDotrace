@@ -229,6 +229,17 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
   const timer = foldTimerEvents(sources.events)
   const starts = new Map(sources.events.filter(e => e.type === 'task/timer-started').map(e => [e.id, e]))
   const focusByDay = new Map<DayKey, number>()
+  const projectAtStart = new Map<string, string | null>()
+  const taskProjects = new Map<string, string | null>()
+  for (const event of sources.events) {
+    if (event.type === 'task/created' || event.type === 'task/updated') {
+      const payload = event.payload as { taskId: string; projectId: string | null }
+      taskProjects.set(payload.taskId, payload.projectId)
+    } else if (event.type === 'task/timer-started') {
+      projectAtStart.set(event.id, taskProjects.get((event.payload as { taskId: string }).taskId) ?? null)
+    }
+  }
+  const projectMillisByDay = new Map<DayKey, Map<string | null, number>>()
   const sessions = [...timer.sessions, ...(timer.active === null ? [] : [{ ...timer.active, stoppedAt: now.toISOString() }])]
   for (const session of sessions) {
     const start = starts.get(session.sessionId)
@@ -242,6 +253,10 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
       const next = Math.min(end, boundary)
       if (next <= cursor) break
       focusByDay.set(key, (focusByDay.get(key) ?? 0) + next - cursor)
+      const projects = projectMillisByDay.get(key) ?? new Map<string | null, number>()
+      const projectId = projectAtStart.get(session.sessionId) ?? null
+      projects.set(projectId, (projects.get(projectId) ?? 0) + next - cursor)
+      projectMillisByDay.set(key, projects)
       cursor = next
     }
   }
@@ -251,6 +266,22 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
   const heatmap = fillDays(dayList(heatmapStart, heatmapEnd), today, sources, completedByDay, createdByDay, focusByDay)
   const rangeEnd = range.to < today ? range.to : today
   const days = fillDays(dayList(range.from, rangeEnd), today, sources, completedByDay, createdByDay, focusByDay)
+  const projectSeconds = new Map<string | null, number>()
+  for (const day of days) {
+    const groups = [...(projectMillisByDay.get(day.dayKey) ?? [])].map(([id, ms]) => ({ id, seconds: Math.floor(ms / 1000), remainder: ms % 1000 }))
+    // 以日累计秒数为准分配余数，项目之和始终等于总专注时长。
+    let remaining = day.focusSeconds - groups.reduce((sum, group) => sum + group.seconds, 0)
+    groups.sort((a, b) => b.remainder - a.remainder || String(a.id).localeCompare(String(b.id)))
+    for (const group of groups) {
+      const seconds = group.seconds + (remaining-- > 0 ? 1 : 0)
+      projectSeconds.set(group.id, (projectSeconds.get(group.id) ?? 0) + seconds)
+    }
+  }
+  const projects = new Map(sources.projection.projects.map(project => [project.id, project]))
+  const focusProjects = [...projectSeconds].filter(([, seconds]) => seconds > 0).map(([projectId, seconds]) => {
+    const project = projectId === null ? undefined : projects.get(projectId)
+    return { projectId, seconds, name: projectId === null ? '未归属项目' : project ? `${project.name}${project.deletedAt === null ? '' : '（已删除）'}` : '已移除项目' }
+  }).sort((a, b) => b.seconds - a.seconds || String(a.projectId).localeCompare(String(b.projectId)))
   const trend = trendOf(days, query.period)
   const score = scoreOf({ days, range, today, sources, createdTasks, goalMinutes: query.goalMinutes })
   const durationDays = days.filter((day) => day.durationMinutes !== null)
@@ -272,7 +303,7 @@ export function getTrace(db: Db, accountId: string, now: Date, query: TraceQuery
   const owned = selected === null ? [] : liveTasks.filter((task) => task.projectId === selected.id)
   const occurrenceEvents = occurrenceEventsOf(sources.events)
   return {
-    today, focusRunning: timer.active !== null, period: query.period, range, goalMinutes: query.goalMinutes, heatmap, days,
+    today, focusProjects, focusRunning: timer.active !== null, period: query.period, range, goalMinutes: query.goalMinutes, heatmap, days,
     trend: trend.trend, trendUnit: trend.trendUnit, score,
     totals: {
       created: days.reduce((sum, day) => sum + day.created, 0),
