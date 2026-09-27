@@ -24,3 +24,37 @@ playwright/.cache/
 # 离线发布产物与本机临时文件
 releases/
 __pycache__/
+
+# 私有部署配置、部署文档及离线升级工具（保留本地，不公开）
+/deploy/
+/scripts/release/
+
+# 内部设计文档、截图与开发工具配置
+/docs/
+/.agents/
+/.codex/
+/.zcode/
+
+# 本地环境与凭据；仅允许提交不含真实值的示例配置
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+
+# 数据库、备份与本地分析产物，防止保存到 data/ 以外后误提交
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+/backups/
+coverage/
+*.py[cod]

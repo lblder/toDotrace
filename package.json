@@ -17,9 +17,7 @@
     "test:watch": "vitest",
     "test:browser": "playwright test",
     "typecheck": "tsc --noEmit",
-    "verify": "bash scripts/verify.sh",
-    "release": "node scripts/release/release.mjs",
-    "deploy": "node scripts/release/deploy.mjs"
+    "verify": "bash scripts/verify.sh"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.103.1",
