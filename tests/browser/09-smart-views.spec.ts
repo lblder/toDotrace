@@ -18,7 +18,7 @@ async function visit(page: Page, baseUrl: string, token: string): Promise<void> 
   await expectScreen(page, 'tasks')
 }
 
-async function openView(page: Page, name: '我的一天' | '重要' | '计划' | '全部任务' | '已完成'): Promise<void> {
+async function openView(page: Page, name: '我的一天' | '计划' | '全部任务' | '已完成'): Promise<void> {
   await page.getByRole('button', { name, exact: true }).first().click()
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(name)
 }
@@ -58,11 +58,11 @@ test.describe.serial('智能视图与我的一天', () => {
       await taskRow.getByRole('button', { name: '查看《无日期的今日选择》详情' }).click()
       await taskRow.getByRole('button', { name: '将《无日期的今日选择》标为重要' }).click()
       await expect(taskRow.getByRole('button', { name: '取消《无日期的今日选择》的重要标记' })).toHaveAttribute('aria-pressed', 'true')
-      await expect(page.getByRole('combobox', { name: '重要性', exact: true })).toHaveValue('high')
-      await openView(page, '重要')
+      await expect(page.getByRole('button', { name: '取消重要标记', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await openView(page, '全部任务')
       await expect(rowOf(page, '无日期的今日选择')).toHaveCount(1)
       await rowOf(page, '无日期的今日选择').getByRole('button', { name: '取消《无日期的今日选择》的重要标记' }).click()
-      await expect(rowOf(page, '无日期的今日选择')).toHaveCount(0)
+      await expect(rowOf(page, '无日期的今日选择').getByRole('button', { name: '将《无日期的今日选择》标为重要' })).toBeVisible()
       await openView(page, '我的一天')
       await expect(rowOf(page, '无日期的今日选择')).toHaveCount(1)
       await page.getByRole('button', { name: '批量选择', exact: true }).click()
@@ -122,12 +122,16 @@ test.describe.serial('智能视图与我的一天', () => {
     } finally { await page.close() }
   })
 
-  test('重要上下文新增只建一条任务，重要与全部共享', async () => {
+  test('新建星标保存重要性且不再提供重要视图', async () => {
     const page = await browser.newPage({ locale: 'zh-CN' })
     try {
       await visit(page, stackOf().baseUrl, token)
-      await openView(page, '重要')
-      await quickAdd(page, '需要优先处理')
+      await openView(page, '全部任务')
+      await expect(page.getByRole('button', { name: '重要', exact: true })).toHaveCount(0)
+      await page.getByRole('button', { name: '＋ 新建任务', exact: true }).click()
+      await page.getByLabel('写点什么').fill('需要优先处理')
+      await page.getByRole('button', { name: '标为重要', exact: true }).click()
+      await page.getByRole('button', { name: '添加', exact: true }).click()
       await expect(rowOf(page, '需要优先处理').locator('.ta-tasks__star')).toBeVisible()
       await openView(page, '全部任务')
       await expect(rowOf(page, '需要优先处理')).toHaveCount(1)
@@ -240,7 +244,7 @@ test.describe.serial('智能视图与我的一天', () => {
       const picker = page.getByRole('combobox', { name: '切换任务视图' })
       await expect(picker).toBeVisible()
       for (const [value, heading] of [
-        ['focus', '我的一天'], ['important', '重要'], ['planned', '计划'],
+        ['focus', '我的一天'], ['planned', '计划'],
         ['all', '全部任务'], [`project:${projectId}`, '移动端项目'], ['completed', '已完成'],
       ] as const) {
         await picker.selectOption(value)
@@ -275,8 +279,7 @@ test.describe.serial('智能视图与我的一天', () => {
       await expect(row).toHaveCount(1)
       await row.getByRole('checkbox', { name: '完成《自动纳入日计划》', exact: true }).click()
       await expect(row.getByRole('checkbox', { name: '取消完成《自动纳入日计划》', exact: true })).toBeChecked()
-      await openView(page, '重要')
-      await expect(row).toHaveCount(0)
+      expect(itemByTitle(await listTasks(stackOf(), token, 'all'), '自动纳入日计划').importance).toBe('high')
       await openView(page, '已完成')
       await expect(row).toHaveCount(1)
     } finally { await page.close() }

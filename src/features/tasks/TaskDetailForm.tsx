@@ -1,3 +1,4 @@
+import { ImportanceButton } from './ImportanceButton'
 import { useState } from 'react'
 import { weekStart, type DayKey } from '@shared/time'
 import { MAX_TAGS } from '@shared/quickadd'
@@ -300,19 +301,10 @@ function TaskDetailEditor({
         </label>
 
         <div className="ta-tasks__grid">
-          <label className="ta-field">
+          <div className="ta-field">
             <span className="ta-field__label">重要性</span>
-            <select
-              className="ta-input"
-              value={importance}
-              onChange={(event) => setImportance(event.target.value as typeof importance)}
-              aria-label="重要性"
-            >
-              <option value="low">低</option>
-              <option value="normal">普通</option>
-              <option value="high">重要</option>
-            </select>
-          </label>
+            <ImportanceButton important={importance === 'high'} disabled={busy} onChange={(important) => setImportance(important ? 'high' : 'normal')} />
+          </div>
 
           <label className="ta-field">
             <span className="ta-field__label">项目</span>

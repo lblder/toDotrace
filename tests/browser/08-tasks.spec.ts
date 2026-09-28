@@ -231,7 +231,7 @@ test.describe.serial('任务链路', () => {
     // 打开详情 + 改重要性 + 保存 —— 这些都不该改变状态（01 FR2.1 v1.3）
     await row.getByRole('button', { name: '详情', exact: true }).click()
     const detail = page.locator('.ta-tasks__right')
-    await detail.getByLabel('重要性').selectOption('high')
+    await detail.getByRole('button', { name: '标为重要', exact: true }).click()
     await detail.getByRole('button', { name: '保存任务' }).click()
     await expect(detail.getByTestId('detail-feedback')).toContainText('已保存')
     await expect(inProgress).toHaveAttribute('aria-pressed', 'false')
@@ -336,7 +336,7 @@ test.describe.serial('任务链路', () => {
     await expectScreen(page, 'tasks')
 
     // 具体项目直接出现在左侧；不再有泛化“项目”页和二次选择器。
-    await page.getByRole('navigation', { name: '我的项目' }).getByRole('button', { name: '秋季课题' }).click()
+    await page.getByRole('navigation', { name: '我的项目' }).getByRole('button', { name: '秋季课题', exact: true }).click()
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('秋季课题')
 
     await expect(rowOf(page, '十月的实验')).toHaveCount(1)

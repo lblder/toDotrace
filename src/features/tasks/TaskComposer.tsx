@@ -1,3 +1,4 @@
+import { ImportanceButton } from './ImportanceButton'
 import { useRef, useState, type FormEvent } from 'react'
 import { isDayKey, weekStart, type DayKey } from '@shared/time'
 import type { QuickAddResult } from '@shared/quickadd'
@@ -300,14 +301,10 @@ export function TaskComposer({ context, onCreated, onNotice }: TaskComposerProps
 
           <div className="ta-composer__section">
             <div className="ta-composer__sectionHead"><span>归类</span><small>可选</small></div>
-            <label className="ta-field">
+            <div className="ta-field">
               <span className="ta-field__label">重要性</span>
-              <select className="ta-input" value={importance} onChange={(event) => setOverrides((previous) => ({ ...previous, importance: event.target.value as Importance }))} disabled={busy}>
-                <option value="normal">普通</option>
-                <option value="high">重要</option>
-                <option value="low">低</option>
-              </select>
-            </label>
+              <ImportanceButton important={importance === 'high'} disabled={busy} onChange={(important) => setOverrides((previous) => ({ ...previous, importance: important ? 'high' : 'normal' }))} />
+            </div>
             <label className="ta-field">
               <span className="ta-field__label">项目</span>
               <select className="ta-input" value={projectId} onChange={(event) => setOverrides((previous) => ({ ...previous, projectId: event.target.value }))} disabled={busy}>

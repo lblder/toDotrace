@@ -21,15 +21,14 @@ import { ProjectSortableList } from './ProjectSortableList'
 import { SORT_TEXT } from './labels'
 import './tasks.css'
 
-type View = 'focus' | 'important' | 'planned' | 'completed' | 'project' | 'all'
+type View = 'focus' | 'planned' | 'completed' | 'project' | 'all'
 const SMART_VIEWS = [
   { value: 'focus', label: '我的一天', glyph: '☀' },
-  { value: 'important', label: '重要', glyph: '☆' },
   { value: 'planned', label: '计划', glyph: '▦' },
   { value: 'all', label: '全部任务', glyph: '☷' },
 ] as const
 const VIEW_TITLES: Record<View, string> = {
-  focus: '我的一天', important: '重要', planned: '计划', completed: '已完成', project: '项目任务', all: '全部任务',
+  focus: '我的一天', planned: '计划', completed: '已完成', project: '项目任务', all: '全部任务',
 }
 const PLAN_PERIODS: { value: PlanPeriod; label: string }[] = [
   { value: 'scheduled', label: '已安排' }, { value: 'overdue', label: '逾期 / 待调整' },
@@ -102,8 +101,7 @@ export function TasksPage() {
         projectInterval: { startsOn: currentProject.startsOn, endsOn: currentProject.endsOn },
       } : {}),
     })
-    return sortItems(filtered.filter((item) => view === 'important' ? item.importance === 'high'
-      : view === 'planned' ? matchesPlanPeriod(item, planPeriod, today) : true), today, sortMode)
+    return sortItems(filtered.filter((item) => view === 'planned' ? matchesPlanPeriod(item, planPeriod, today) : true), today, sortMode)
   }, [today, projectUnselected, view, list.items, completionPeriod, myDayItems, sortMode, statusFilter, currentProject, planPeriod])
 
   const canCreate = view !== 'completed' && !projectUnselected && !(view === 'planned' && planPeriod === 'overdue')
@@ -120,7 +118,7 @@ export function TasksPage() {
   const isReading = list.isLoading || today === null || (view === 'focus' && (focus.isLoading || history.isLoading || !dayReady || !historyReady))
   const readError = list.isError ? list.error : view === 'focus' && focus.isError ? focus.error : view === 'focus' && history.isError ? history.error : null
   const quickContext = view === 'focus' ? { kind: 'my-day' as const }
-    : view === 'important' ? { kind: 'important' as const }
+
     : view === 'project' ? { kind: 'project' as const, projectId: effectiveProject ?? undefined, label: currentProject?.name }
     : view === 'planned' ? { kind: 'planned' as const, planPeriod, ...(today === null ? {} : planCreationDefaults(planPeriod, today)), label: PLAN_PERIODS.find((option) => option.value === planPeriod)?.label }
     : { kind: 'all' as const }
@@ -309,7 +307,7 @@ export function TasksPage() {
           {undoState === null ? null : <p className="ta-banner ta-banner--info ta-tasks__undo" role="status"><span>已删除《{undoState.title}》。</span><button type="button" className="ta-btn ta-btn--secondary ta-btn--sm" onClick={runUndo} disabled={actions.undo.isPending} data-testid="undo-delete">撤销（30 秒内）</button></p>}
           {readError !== null ? <div className="ta-tasks__errorBox"><p className="ta-banner ta-banner--error" role="alert">{errorMessage(readError)}</p><button type="button" className="ta-btn ta-btn--secondary" onClick={() => { list.refetch(); history.refetch(); void focus.refetch() }}>重试</button></div>
             : isReading ? <p className="ta-tasks__hint">正在读取任务…</p>
-              : projectUnselected ? null : visible.length === 0 ? <p className="ta-tasks__empty">{view === 'focus' ? '暂无任务。' : view === 'completed' ? '暂无完成记录。' : view === 'important' ? '暂无重要任务。' : '暂无任务。'}</p>
+              : projectUnselected ? null : visible.length === 0 ? <p className="ta-tasks__empty">{view === 'focus' ? '暂无任务。' : view === 'completed' ? '暂无完成记录。' : '暂无任务。'}</p>
                 : view === 'completed' ? renderHistoryRows(visible) : <>
                   {inRange.length > 0 ? renderRows(inRange) : null}
                   {outsideRange.length > 0 ? <div className="ta-tasks__group"><h3 className="ta-tasks__groupHeading">项目周期之外 <span>{outsideRange.length}</span></h3>{renderRows(outsideRange)}</div> : null}
