@@ -123,10 +123,29 @@ const checkinReturnedDefinition = defineEvent({
   },
 })
 
+const autoLeftDefinition = defineEvent({
+  type: 'checkin/auto-left', schema: checkinPayloadSchema,
+  apply: checkinLeftDefinition.apply,
+})
+const correctedDepartureDefinition = defineEvent({
+  type: 'checkin/departure-corrected',
+  schema: z.object({ leftAt: z.iso.datetime({ offset: true }) }).strict(),
+  apply(projection, event) {
+    const day = findDay(projection, event.dayKey)
+    if (!day) return
+    day.leftAt = event.payload.leftAt
+    if (day.breaks) day.breaks = day.breaks.filter(b => Date.parse(b.startedAt) < Date.parse(day.leftAt!)).map(b => ({
+      ...b, endedAt: b.endedAt === null || Date.parse(b.endedAt) > Date.parse(day.leftAt!) ? day.leftAt : b.endedAt,
+    }))
+  },
+})
+
 /** 打卡事件定义 */
 export const checkinEventDefinitions: readonly RegisteredDefinition[] = [
   checkinArrivedDefinition,
   checkinLeftDefinition,
   checkinAwayDefinition,
   checkinReturnedDefinition,
+  autoLeftDefinition,
+  correctedDepartureDefinition,
 ]

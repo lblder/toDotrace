@@ -1,3 +1,4 @@
+import { correctDeparture } from '../checkin/boundary.js'
 import { Router, type Request, type RequestHandler } from 'express'
 import { z } from 'zod'
 import { compareDayKey, diffDays, isDayKey, type DayKey } from '@shared/time'
@@ -133,6 +134,14 @@ export function checkinRoutes(db: Db, requireAuth: RequestHandler): Router {
       res.json(db.transaction(() => setAway(db, accountId, new Date(), away))())
     })
   }
+
+  router.put('/days/:dayKey/departure', (req, res) => {
+    const accountId = getAuth(req).user.id
+    const dayKey = dayKeyParam(req)
+    const { leftAt } = parseInput(z.object({ leftAt: z.iso.datetime({ offset: true }) }).strict(), req.body)
+    db.transaction(() => correctDeparture(db, accountId, new Date(), dayKey, leftAt))()
+    res.json(today(db, accountId, new Date()))
+  })
 
   router.get('/today', (req, res) => {
     const accountId = getAuth(req).user.id

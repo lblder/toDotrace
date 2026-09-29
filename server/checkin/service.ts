@@ -1,3 +1,4 @@
+import { attendanceAnomalies } from './boundary.js'
 import { compareDayKey, toDayKey, type DayKey } from '@shared/time'
 import { stopActiveTimer } from '../timer/service.js'
 import { currentStreak } from '@shared/checkin'
@@ -57,6 +58,7 @@ export interface CheckinResult {
 
 /** 今日状态（ADR-012 §5：休息日就是 `day: null`，不另设 `isRestDay` 字段）。 */
 export interface TodayResult {
+  anomalies?: ReturnType<typeof attendanceAnomalies>
   activeDay?: DayRow
   day: DayRow | null
   streak: number
@@ -173,6 +175,7 @@ export function today(db: Db, accountId: string, now: Date): TodayResult {
   const day = projection.days.find((row) => row.dayKey === dayKey)
   const latest = projection.days.at(-1)
   return {
+    anomalies: attendanceAnomalies(db, accountId, now),
     day: day === undefined ? null : toDayRow(day),
     ...(day === undefined && latest?.leftAt === null ? { activeDay: toDayRow(latest) } : {}),
     // days 按账号、归属日唯一；离开和重复请求不会增加天数。

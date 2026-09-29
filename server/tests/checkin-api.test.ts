@@ -175,7 +175,7 @@ describe('GET /today（ADR-012 §3/§5）', () => {
 
     expect(res.status).toBe(200)
     // §5：休息日不另设 isRestDay 字段，day === null 就是它
-    expect(res.body).toEqual({ day: null, streak: 0, totalDays: 0 })
+    expect(res.body).toEqual({ day: null, streak: 0, totalDays: 0, anomalies: [] })
   })
 
   it('已打卡：day 有值、streak 从 1 起', async () => {

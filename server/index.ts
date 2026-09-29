@@ -1,3 +1,5 @@
+import { closeExpiredAttendance } from './checkin/boundary.js'
+import { listUsers } from './repo/users.js'
 import { createApp } from './app.js'
 import { loadConfig } from './config.js'
 import { closeDb, getDb, initializeDatabase } from './db/index.js'
@@ -24,6 +26,14 @@ function main(): void {
   }
 
   const app = createApp({ db, config })
+  // Private upgrade rehearsals disable jobs while verifying the untouched backup.
+  const boundaryJob = process.env.TODOAGENT_DISABLE_JOBS === '1' ? undefined : setInterval(() => {
+    for (const user of listUsers(db)) {
+      try { db.transaction(() => closeExpiredAttendance(db, user.id, new Date()))() }
+      catch (error) { console.error('日界自动离开失败', error) }
+    }
+  }, 10_000)
+  boundaryJob?.unref()
   let startupFailed = false
 
   const server = app.listen(config.port, config.host, () => {
@@ -58,6 +68,7 @@ function main(): void {
   })
 
   const shutdown = (signal: string): void => {
+    clearInterval(boundaryJob)
     console.log(`\n收到 ${signal}，正在关闭…`)
     server.close(() => {
       closeDb()

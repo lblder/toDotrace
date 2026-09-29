@@ -1,3 +1,4 @@
+import { DepartureCorrection } from './DepartureCorrection'
 import { useState } from 'react'
 import { useCheckin } from '../../hooks/use-checkin'
 import type { CheckinMutation } from '../../hooks/use-checkin'
@@ -19,7 +20,7 @@ interface Feedback {
 
 /** 到达后可以多次暂离、返回；最终离开闭合本次打卡。 */
 export function CheckinPage() {
-  const { day, streak, totalDays, isLoading, isError, error, refetch, arrive, leave, away, resume } = useCheckin()
+  const { anomalies, correct, day, streak, totalDays, isLoading, isError, error, refetch, arrive, leave, away, resume } = useCheckin()
 
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   /**
@@ -143,6 +144,8 @@ export function CheckinPage() {
           </p>
         )}
       </section>
+
+      <DepartureCorrection anomalies={anomalies} correct={correct} />
 
       {/* 读数卡依赖 /today 的成功结果：没拿到就不摆一个编出来的 0 */}
       {isLoading || isError ? null : (

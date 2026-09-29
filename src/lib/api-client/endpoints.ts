@@ -151,6 +151,9 @@ export const api = {
   returnCheckin(): Promise<CheckinResult> {
     return request<CheckinResult>({ method: 'POST', path: '/api/checkin/return', auth: true })
   },
+  correctDeparture(dayKey: string, leftAt: string): Promise<TodayCheckin> {
+    return request<TodayCheckin>({ method: 'PUT', path: `/api/checkin/days/${encodeURIComponent(dayKey)}/departure`, auth: true, body: { leftAt } })
+  },
   leaveCheckin(): Promise<CheckinResult> {
     return request<CheckinResult>({ method: 'POST', path: '/api/checkin/leave', auth: true })
   },

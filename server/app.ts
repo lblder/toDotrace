@@ -1,3 +1,5 @@
+import { closeExpiredAttendance } from './checkin/boundary.js'
+import { getAuth } from './middleware/auth.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import express, { type Express, type NextFunction, type Request, type Response } from 'express'
@@ -71,7 +73,14 @@ export function createApp(options: AppOptions): Express {
     })
   }
 
-  const requireAuth = createRequireAuth(db, config)
+  const authenticate = createRequireAuth(db, config)
+  const requireAuth: express.RequestHandler = (req, res, next) => authenticate(req, res, (error?: unknown) => {
+    if (error) return next(error)
+    try {
+      db.transaction(() => closeExpiredAttendance(db, getAuth(req).user.id, new Date()))()
+      next()
+    } catch (cause) { next(cause) }
+  })
   // OPTIONS 关口专用：只读鉴权，不续期、不 touch（ADR-008 §8 补遗 10）。
   const requireAuthReadOnly = createRequireAuth(db, config, { readOnly: true })
 

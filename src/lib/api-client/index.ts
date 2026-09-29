@@ -17,6 +17,7 @@ export type {
   TimerTaskConfig,
 } from '@shared/timer'
 export type {
+  AttendanceAnomaly,
   AuthPayload,
   CheckinResult,
   CreateInvitePayload,

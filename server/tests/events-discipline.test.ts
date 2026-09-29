@@ -263,6 +263,8 @@ describe('注册表（ADR-010 §2）', () => {
       // 故两列 target 为 NULL——与设置事件同类。
       'checkin/arrived': withoutTarget,
       'checkin/left': withoutTarget,
+      'checkin/auto-left': withoutTarget,
+      'checkin/departure-corrected': withoutTarget,
       'checkin/away': withoutTarget,
       'checkin/returned': withoutTarget,
       // 每日备注（ADR-017 §6）同理：`dayKey` 是日期值，不是某个实体的标识

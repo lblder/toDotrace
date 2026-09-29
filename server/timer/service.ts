@@ -63,6 +63,8 @@ export function foldTimerEvents(events: readonly Event[]): TimerState {
     } else if (event.type === 'checkin/away' || event.type === 'checkin/left') {
       // 兼容旧版本没有显式停止事件的历史记录。
       stopActive(event.occurredAt)
+    } else if (event.type === 'checkin/auto-left') {
+      if (active && Date.parse(active.startedAt) < Date.parse(event.occurredAt)) stopActive(event.occurredAt)
     } else if (event.type === TIMER_STOPPED_TYPE) {
       const payload = event.payload as TimerStoppedPayload
       if (active?.sessionId === payload.sessionId && active.taskId === payload.taskId) {
@@ -71,6 +73,25 @@ export function foldTimerEvents(events: readonly Event[]): TimerState {
     }
   }
 
+  // Corrections trim historical sessions only, never today's running timer.
+  const departures = new Map<string, { arrivedAt: number; originalEnd: number; correctedEnd?: number }>()
+  for (const event of events) {
+    if (event.type === 'checkin/arrived') departures.set(event.dayKey, { arrivedAt: Date.parse(event.occurredAt), originalEnd: Infinity })
+    const visit = departures.get(event.dayKey)
+    if (!visit) continue
+    if (event.type === 'checkin/left' || event.type === 'checkin/auto-left') visit.originalEnd = Date.parse(event.occurredAt)
+    if (event.type === 'checkin/auto-left') visit.correctedEnd = visit.originalEnd
+    if (event.type === 'checkin/departure-corrected') visit.correctedEnd = Date.parse((event.payload as { leftAt: string }).leftAt)
+  }
+  for (const session of sessions) {
+    for (const visit of departures.values()) {
+      if (visit.correctedEnd === undefined || Date.parse(session.startedAt) >= visit.originalEnd || Date.parse(session.stoppedAt) <= visit.arrivedAt) continue
+      if (Date.parse(session.stoppedAt) > visit.correctedEnd) {
+        session.stoppedAt = new Date(Math.max(Date.parse(session.startedAt), visit.correctedEnd)).toISOString()
+        session.elapsedSeconds = elapsedSeconds(session.startedAt, session.stoppedAt)
+      }
+    }
+  }
   return {
     active,
     tasks: [...configs].map(([taskId, enabled]) => ({ taskId, enabled })).sort((a, b) =>

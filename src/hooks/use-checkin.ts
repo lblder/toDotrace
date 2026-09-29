@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { UseMutationResult } from '@tanstack/react-query'
 import { api } from '../lib/api-client'
-import type { CheckinResult, DayRow, TodayCheckin } from '../lib/api-client'
+import type { AttendanceAnomaly, CheckinResult, DayRow, TodayCheckin } from '../lib/api-client'
 import { TIMER_QUERY_KEY } from './use-timer'
 import { queryKeys } from './query-keys'
 
 export interface CheckinApi {
+  readonly anomalies: AttendanceAnomaly[]
+  readonly correct: UseMutationResult<TodayCheckin, Error, { dayKey: string; leftAt: string }>
   /** 今日记录，或跨日尚未结束的最近一次到达。 */
   readonly day: DayRow | null
   /** 连续打卡天数，**由服务端按 shared/checkin 的口径算好**（ADR-012 §6） */
@@ -43,6 +45,7 @@ export function useCheckin(): CheckinApi {
     queryKey: queryKeys.checkinToday,
     queryFn: async ({ signal }) => api.getTodayCheckin(signal),
     retry: false,
+    refetchInterval: 10_000,
   })
 
   /**
@@ -81,7 +84,16 @@ export function useCheckin(): CheckinApi {
     mutationFn: () => api.returnCheckin(), onSuccess: applyResult,
   })
 
+  const correct = useMutation({
+    mutationFn: ({ dayKey, leftAt }: { dayKey: string; leftAt: string }) => api.correctDeparture(dayKey, leftAt),
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.checkinToday, data)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.trace })
+      void queryClient.invalidateQueries({ queryKey: TIMER_QUERY_KEY })
+    },
+  })
   return {
+    anomalies: query.data?.anomalies ?? [], correct,
     day: query.data?.activeDay ?? query.data?.day ?? null,
     streak: query.data?.streak ?? 0,
     totalDays: query.data?.totalDays ?? 0,

@@ -383,3 +383,19 @@
     gap: var(--space-4);
   }
 }
+
+.ta-departure {
+  width: min(440px, calc(100vw - 32px)); box-sizing: border-box;
+  border: 1px solid var(--c-border); border-radius: 18px; padding: 28px;
+  color: var(--c-ink); background: var(--c-panel); max-height: 90vh; overflow: auto;
+}
+.ta-departure::backdrop { background: #0008; backdrop-filter: blur(4px); }
+.ta-departure h2 { margin: 0 0 16px; }
+.ta-departure p { line-height: 1.7; }
+.ta-departure__arrival { font-size: 13px; opacity: .75; }
+.ta-departure__ring { display: block; width: min(280px, 100%); margin: 12px auto; touch-action: none; color: var(--c-primary-text); cursor: grab; }
+.ta-departure__ring:active { cursor: grabbing; }
+.ta-departure__clockBg { fill: var(--c-panel); }
+.ta-departure__input { display: grid; gap: 8px; }
+.ta-departure__input input { width: 100%; box-sizing: border-box; padding: 10px; }
+.ta-departure__actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 8px; }

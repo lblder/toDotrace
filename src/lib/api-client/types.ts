@@ -162,7 +162,15 @@ export interface CheckinResult {
  * 界面呈现为「今天偷偷懒」，不计入打卡天数——**不是错误态、不是缺失态**。
  * 响应里没有 `isRestDay` 字段：它完全由 `day === null` 决定（v1.1 删去了这个冗余）。
  */
+export interface AttendanceAnomaly {
+  readonly dayKey: string
+  readonly arrivedAt: string
+  readonly leftAt: string | null
+  readonly boundaryAt: string
+  readonly timeZone: string
+}
 export interface TodayCheckin {
+  readonly anomalies?: AttendanceAnomaly[]
   readonly activeDay?: DayRow
   readonly day: DayRow | null
   readonly streak: number
